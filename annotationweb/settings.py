@@ -43,6 +43,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'annotationweb',
     'classification',
+    'blind_classification',
     'boundingbox',
     'landmark',
     'user',

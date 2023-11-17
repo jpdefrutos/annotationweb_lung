@@ -1,0 +1,10 @@
+{% extends 'annotationweb/do_task_plain.html' %}
+
+{% block task_javascript %}
+
+loadBlindClassificationTask();
+
+{% if chosen_label %}
+changeLabel({{ chosen_label }});
+{% endif %}
+{% endblock task_javascript %}
