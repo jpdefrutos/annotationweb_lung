@@ -1,0 +1,119 @@
+
+{% extends 'annotationweb/two_column_layout.html' %}
+
+{% block javascript %}
+
+initializeAnnotation({{ task.id }}, {{ image.id }});
+
+{% if image_sequence %}
+loadSequence(
+    {{ image_sequence.id }},
+    {{ image_sequence.start_frame_nr }},
+    {{ image_sequence.nr_of_frames }},
+    {%  if task.show_entire_sequence %}true{% else %}false{% endif %},
+    {%  if task.user_frame_selection %}true{% else %}false{% endif %},
+    {%  if task.annotate_single_frame %}true{% else %}false{% endif %},
+    [ {% for frame_nr in frames %}{{ frame_nr }},{% endfor %}],
+    {{ task.frames_before }},
+    {{ task.frames_after }},
+    {% if task.auto_play %}true{% else %}false{% endif %}
+);
+{% endif %}
+
+{# Add label buttons #}
+{% for label in labels %}
+    addLabelButton({{ label.id }}, {{ label.color_red }}, {{ label.color_green }}, {{ label.color_blue }}, {% if label.parent %}{{ label.parent.id }}{% else  %}0{% endif %});
+{% endfor %}
+
+{% block task_javascript %}
+{% endblock %}
+
+{% if return_url %}
+setReturnURL('{{ return_url|safe }}');
+{% endif %}
+
+{% endblock javascript %}
+
+{% block content_left %}
+
+{% for message in messages %}
+<div{% if message.tags %} class="{{ message.tags }}"{% endif %}>{{ message }}</div>
+{% endfor %}
+<div id="message"></div>
+
+<h2>{{ task.name }}</h2>
+
+{{ task.number_of_annotated_images }} of {{ task.total_number_of_images}} videos/images have been labeled ({{ task.percentage_finished }}%)<br><br>
+
+{% if image_sequence %}
+<div id="progressbar"><div class="progress-label">Loading...</div></div>
+<div id="sliderText">Drag the slider to view the other frames in the sequence. Current frame <span id="currentFrame"></span></div>
+<div id="slider"></div>
+<div class="actionButtons">
+    <button id="playButton" type="button"><i id="play" class="fa fa-play"></i></button>
+</div>
+{% endif %}
+
+<div id="dialogConfirm">
+    You have done changes to the annotation. <br>
+    Do you wish to save the changes before going to the next/previous image?
+</div>
+<h3>Annotation</h3>
+
+
+<div id="labelButtons">
+{% block label_buttons %}
+<div class="flexButtons">
+    {% for label in toplabels %}
+        <button onclick="changeLabel({{ label.id }})" class="labelButton" id="labelButton{{ label.id }}">{{ label.name }}</button>
+    {% endfor %}
+</div>
+{% for sublabel in sublabels %}
+    <div id="sublabel_{{ sublabel.id }}">
+        <hr>
+    <div class="flexButtons">
+        {% for label in sublabel.labels %}
+        <button onclick="changeLabel({{ label.id }})" class="labelButton" id="labelButton{{ label.id }}">{{ label.name }}</button>
+        {% endfor %}
+    </div>
+    </div>
+{% endfor %}
+{% endblock label_buttons %}
+</div>
+<br>
+<div>
+{% block task_instructions %}
+{% endblock %}
+</div>
+
+<div>
+    <h3>Comments</h3>
+    <textarea id="comments" style="width: 100%; height: 100px">{{ comments }}</textarea>
+</div>
+
+{% endblock content_left %}
+
+{% block content_right %}
+
+<canvas id="canvas">Failed to show images. Canvas probably not supported in the browser.</canvas>
+
+{% block task_content %}
+{% endblock %}
+
+<br>
+
+
+{% if image.metadata_set.count > 0 %}
+<h3>Image metadata</h3>
+{% for metadata in image.metadata_set.all %}
+<strong>{{ metadata.name }}:</strong> {{ metadata.value }}<br>
+{% endfor %}
+{% endif %}
+
+{% if task.description|length > 0 %}
+<h3>Task description</h3>
+
+{{ task.description|safe }}
+{% endif %}
+
+{% endblock content_right %}
