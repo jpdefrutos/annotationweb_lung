@@ -1,4 +1,7 @@
 from math import sqrt, floor, ceil
+
+from typing import List
+
 from common.exporter import Exporter
 from common.metaimage import MetaImage
 from common.utility import create_folder, copy_image
@@ -17,6 +20,8 @@ import codecs
 from PIL import Image
 import base64
 import warnings
+from itertools import compress
+
 
 class SplineSegmentationExporterForm(forms.Form):
     path = forms.CharField(label='Storage path', max_length=1000)
@@ -145,11 +150,15 @@ class SplineSegmentationExporter(Exporter):
                     image_mhd = MetaImage(filename=new_filename)
                     image_size = image_mhd.get_size()
                     spacing = image_mhd.get_spacing()
+                    sliced_along_axis = image_mhd.get_slice_axis()
                 else:
                     image_pil = PIL.Image.open(new_filename)
                     image_size = image_pil.size
                     spacing = [1, 1]
-                self.save_segmentation(frame, image_size, join(subject_subfolder, target_gt_name), spacing, json_annotations)
+                    sliced_along_axis = None
+                image_size = [image_size[1], image_size[0], *image_size[2:]]
+                self.save_segmentation(frame, image_size, join(subject_subfolder, target_gt_name), spacing,
+                                       json_annotations, sliced_along_axis)
 
         return True, path
 
@@ -247,15 +256,25 @@ class SplineSegmentationExporter(Exporter):
         return canvas, (ret_coordinates, xy_new_temp)
 
     @staticmethod
-    def compute_scaling(image_size, spacing):
-        if len(spacing) > len(image_size):
-            warnings.warn(f'Image is {len(image_size)}D and spacing is {len(spacing)}D.'
-                          f'Dropping the extra axes in the spacing vector.')
-            for n in range(len(spacing) - len(image_size)):
-                spacing.pop(-1)
-        elif len(spacing) < len(image_size):
-            raise ValueError(f'Something wrong with the data:'
-                             f'image is {len(image_size)}D and spacing is {len(spacing)}D.')
+    def compute_scaling(image_size, spacing, sliced_along_axis: List[int] =None):
+        if len(spacing) > 2:
+            if sliced_along_axis is None:
+                if len(spacing) == len(image_size):
+                    # Check which elements of image_size are 1 or 0 --> axis used to slice the volume
+                    elements_to_remove = [l in [0, 1] for l in image_size]
+                    if any(elements_to_remove):
+                        elements_to_keep = [not l for l in elements_to_remove]
+                        image_size = compress(image_size, elements_to_keep)
+                        spacing = compress(spacing, elements_to_keep)
+                    else:
+                        raise NotImplementedError('3D segmentations not implemented yet .')
+                else:
+                    warnings.warn(f'Removing excess values from spacing, starting from the outermost axis')
+                    for n in range(len(spacing) - len(image_size)):
+                        spacing.pop(-1)
+            else:
+                for a in sliced_along_axis:
+                    spacing.pop(a)
 
         assert len(image_size) == len(spacing), 'Image size and spacing are expected to have the same dimensions.'
         if len(spacing) == 2:
@@ -267,15 +286,13 @@ class SplineSegmentationExporter(Exporter):
             raise NotImplementedError('3D segmentations not implemented yet')
         return pixel_scaling
 
-    def save_segmentation(self, frame, image_size, filename, spacing, json_annotations):
-        image_size = [image_size[1], image_size[0]]
-
+    def save_segmentation(self, frame, image_size, filename, spacing, json_annotations, sliced_along_axis: List[int] =None):
         # Create compounded segmentation object
         if np.any(spacing != 1):
             print('Anisotropic image detected')
             segmentation = np.zeros(image_size, dtype=np.uint8)
             labels = Label.objects.filter(task=frame.image_annotation.task).order_by('id')
-            scaling = self.compute_scaling(image_size, spacing)
+            scaling = self.compute_scaling(image_size, spacing, sliced_along_axis=sliced_along_axis)
             # TODO: NotImplementedError will be triggered if we are dealing with 3D data
             coords = []
             xy_new_temp = 0
