@@ -13,7 +13,7 @@ loadSequence(
     {%  if task.show_entire_sequence %}true{% else %}false{% endif %},
     {%  if task.user_frame_selection %}true{% else %}false{% endif %},
     {%  if task.annotate_single_frame %}true{% else %}false{% endif %},
-    [ {% for frame_nr in frames %}{{ frame_nr }},{% endfor %}],
+    [ {{ image_sequence.nr_of_frames }}],
     {{ task.frames_before }},
     {{ task.frames_after }},
     {% if task.auto_play %}true{% else %}false{% endif %}
