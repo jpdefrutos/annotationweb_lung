@@ -26,6 +26,11 @@ loadSequence(
 {% endfor %}
 
 {% block task_javascript %}
+loadBlindClassificationTask();
+
+{% if chosen_label %}
+changeLabel({{ chosen_label }});
+{% endif %}
 {% endblock %}
 
 {% if return_url %}

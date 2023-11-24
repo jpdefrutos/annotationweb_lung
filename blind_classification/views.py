@@ -27,7 +27,7 @@ def label_image(request, task_id, image_id):
             print('Not found..')
             pass
 
-        return render(request, 'blind_classification/label_image.html', context)
+        return render(request, 'blind_classification/do_task_blind_classification.html', context)
     except common.task.NoMoreImages:
         messages.info(request, 'This task is finished, no more images to annotate.')
         return redirect('index')
