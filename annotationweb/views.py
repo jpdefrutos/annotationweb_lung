@@ -551,7 +551,7 @@ def task(request, task_id):
                 imageannotation__finished=True,
                 imageannotation__user__in=users_selected,
                 imageannotation__keyframeannotation__imagelabelblind__label__in=labels_selected,
-                subject__in=subjects_selected,
+                # subject__in=subjects_selected,
             )
         else:
             queryset = queryset.filter(
