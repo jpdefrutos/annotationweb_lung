@@ -37,6 +37,7 @@ def label_image(request, task_id, image_id):
 
 
 def save_labels(request):
+    response = {} # initialize response
     try:
         rejected = request.POST['rejected'] == 'true'
         if rejected:

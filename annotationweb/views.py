@@ -448,6 +448,8 @@ def task_description(request, task_id):
         url = reverse('cardiac_parasternal_long_axis:segment_image', args=[task_id])
     elif task.type == task.CARDIAC_ALAX_SEGMENTATION:
         url = reverse('cardiac_apical_long_axis:segment_image', args=[task_id])
+    elif task.type == task.SUBSEQUENCE_CLASSIFICATION:
+        url = reverse('subsequence_classification:label_image', args=[task_id])
     else:
         raise NotImplementedError()
 
@@ -557,6 +559,15 @@ def task(request, task_id):
                 imageannotation__keyframeannotation__imagelabelblind__label__in=labels_selected,
                 # subject__in=subjects_selected,
             )
+        elif task.type == Task.SUBSEQUENCE_CLASSIFICATION: #TODO: now all annotated keyframes are shown within one image sequence, make sure only one is shown
+            labels_selected = search_filters.get_value('label')
+            queryset = queryset.filter(
+                imageannotation__task=task,
+                imageannotation__finished=True,
+                imageannotation__user__in=users_selected,
+                imageannotation__keyframeannotation__subsequencelabel__label__in=labels_selected,
+                subject__in=subjects_selected,
+            )
         else:
             queryset = queryset.filter(
                 imageannotation__image_quality__in=image_quality,
@@ -618,6 +629,8 @@ def get_redirection(task):
         return 'video_annotation:process_image'
     elif task.type == Task.SUBSEQUENCE_CLASSIFICATION:
         return 'subsequence_classification:label_subsequence'
+    else:
+        raise NotImplementedError()
 
 
 # @register.simple_tag

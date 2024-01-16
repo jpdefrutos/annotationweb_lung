@@ -70,7 +70,6 @@
     <div class="actionButtons">
         <button id="playButton" type="button"><i id="play" class="fa fa-play"></i></button>
     {% if task.user_frame_selection %}
-        <button id="addFrameButton" type="button" title="Select frame for annotation"><i class="fa fa-plus"></i></button>
         <button id="removeFrameButton" type="button" title="Remove selected frame from annotations"><i class="fa fa-minus"></i></button>
     {% endif %}
         <button id="nextFrameButton" type="button" title="Next annotation frame"><i class="fa fa-step-forward"></i></button>
@@ -93,7 +92,10 @@
         You have done changes to the annotation. <br>
         Do you wish to save the changes before going to the next/previous image?
     </div>
-    <h3>Annotation</h3>
+    <br>
+
+    {% comment %}
+    <!-- TODO: Fix image quality selection for subsequence classification -->
     <div id="imageQuality">
     <form id="imageQualityForm">
         Image quality:
@@ -102,15 +104,10 @@
         {% endfor %}
     </form>
     </div>
+    {% endcomment %}
 
-    {%  block CopyContentButton %}
-    {%  endblock CopyContentButton%}
-
-    <div>
-        Mark subsequence:
-        <button class='startSubsequenceButton'>Mark start</button>
-        <button class='endSubsequenceButton'>Mark end</button>
-    </div>
+    {% if toplabels|length > 1 %}
+    <h3>Labels</h3>
 
     <div id="labelButtons">
         {% block label_buttons %}
@@ -134,13 +131,20 @@
         {% endblock label_buttons %}
     </div>
 
-    <br>
+    <h3>Mark subsequence </h3>
+
+    {% else %} <!-- Only one top label -->
+    <h3>Mark subsequence with label: {{ toplabels.0.name }}</h3>
+    {% endif %}
+
+    {%  block CopyContentButton %}
+    {%  endblock CopyContentButton%}
+
     <div>
-    {% block task_instructions %}
-        <h3>Task instructions</h3>
-        TODO: Add task instructions here
-    {% endblock %}
+        <button class='startSubsequenceButton'>Mark start</button>
+        <button class='endSubsequenceButton'>Mark end</button>
     </div>
+    <br>
 
     <div>
         <h3>Comments</h3>

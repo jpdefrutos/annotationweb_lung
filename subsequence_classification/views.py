@@ -49,10 +49,15 @@ def save_labels(request):
     """
     TODO: From classification/views.py. Adapt to this task
     """
+    response = {}  # initialize response
     try:
         rejected = request.POST['rejected'] == 'true'
         if rejected:
             annotations = common.task.save_annotation(request)
+            response = {
+                'success': 'true',
+                'message': 'Completed'
+            }
         else:
             with transaction.atomic():
                 annotations = common.task.save_annotation(request)

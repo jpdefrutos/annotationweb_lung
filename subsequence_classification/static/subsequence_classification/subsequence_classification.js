@@ -41,10 +41,7 @@ function loadSubsequenceClassificationTask() {
     endSubsequence.onclick = endButtonClick;
 }
 
-// TODO: Modify function. For now, copied from classification.js
 function sendDataForSave() {
-    console.log('Labels:', JSON.stringify(g_labels));
-    // console.log('Image quality:', $('input[name=quality]:checked').val());
     return $.ajax({
         type: "POST",
         url: "/subsequence-classification/save/",
@@ -53,7 +50,7 @@ function sendDataForSave() {
             task_id: g_taskID,
             frame_labels: JSON.stringify(g_labels),
             target_frames: JSON.stringify(g_targetFrames),
-            quality: $('input[name=quality]:checked').val(),
+            quality: $('input[name=quality]:checked').val() || 'unknown', // Default to unknown if no quality is selected
             rejected: g_rejected ? 'true':'false',
             comments: $('#comments').val(),
         },
@@ -62,9 +59,16 @@ function sendDataForSave() {
 }
 
 function startButtonClick(e) {
+
     if (g_currentLabel === -1) {
-        alert('You need to select a label before marking a subsequence!');
-        return;
+        if (g_labelButtons.length === 1) {
+            changeLabel(g_labelButtons[0].id)
+            console.log('only one label button')
+        }
+        else {
+            alert('You need to select a label before marking a subsequence!');
+            return;
+        }
     }
 
     console.log('Subsequence for', getLabelWithId(g_currentLabel).name, 'started on frame nr', g_currentFrameNr);
@@ -96,6 +100,11 @@ function endButtonClick(e) {
         return;
     }
 
+    if (jQuery.isEmptyObject(g_labels)) {
+        alert('You need to start a subsequence before ending it!');
+        return;
+    }
+
     console.log('Subsequence for', g_currentLabel, 'ended on frame nr', g_currentFrameNr);
 
     // Find start of subsequence with same label
@@ -124,14 +133,21 @@ function setupSubsequenceClassification() {
     // Define event callbacks
     $('#clearButton').click(function () {
         g_annotationHasChanged = true;
+        console.log('Clearing labels');
         // Reset image quality form
         $('#imageQualityForm input[type="radio"]').each(function () {
             $(this).prop('checked', false);
         });
-        g_labels = {};                              // Remove all labels
-        $('#slider').slider('value', g_frameNr);    // Update slider
-        changeLabel(-1);                            // Set all label buttons to inactive
-        redrawSequence();                           // Redraw sequence (without labels)
+        // remove all labels
+        for(var i = 0; i < g_labelButtons.length; i++)  {
+            $('#labelButton' + g_labelButtons[i].id).removeClass('activeLabel');
+        }
+        g_labels = {}; // Remove all labels
+        g_targetFrames = []; // Remove all target frames
+        removeAllSliderMarks(); // Remove all slider marks
+         if (g_labelButtons.length > 1) {
+             g_currentLabel = -1; // Set all label buttons to inactive
+         }
     });
 
     //changeLabel(g_labelButtons[0].id);    // Set first label active
@@ -177,7 +193,6 @@ function findPreviousFrameWithSameLabel(frameIdx, labelId) {
 function redrawSequence() {
     let index = g_currentFrameNr - g_startFrame;
     g_context.drawImage(g_sequence[index], 0, 0, g_canvasWidth, g_canvasHeight); // Draw background image
-    //redrawSliderMarks();
 }
 
 function setLabel(frame_nr, label_id) {
@@ -269,7 +284,6 @@ function loadSequence(
     $('#currentFrame').text(g_currentFrameNr);
     updateFrameLabelVariables();
 
-
     var start;
     var end;
     var totalToLoad;
@@ -293,6 +307,15 @@ function loadSequence(
         max: end,
         step: 1,
         value: g_currentFrameNr,
+        create: function() {
+            var handle = $(this).find('.ui-slider-handle');
+            var width = $(this).width();
+            handle.css({
+                'width': width * 0.02,
+                'margin-left': 0,
+                'margin-right': 0
+            });
+        },
         slide: function(event, ui) {
             g_currentFrameNr = ui.value;
             $('#currentFrame').text(g_currentFrameNr);
@@ -324,13 +347,6 @@ function loadSequence(
     for(var i = 0; i < frames_to_annotate.length; ++i) {
         addKeyFrame(frames_to_annotate[i]);
     }
-
-    // TODO: Notify user to select label with label buttons instead of adding frame
-    $("#addFrameButton").click(function() {
-        setPlayButton(false);
-        addKeyFrame(g_currentFrameNr);
-        g_currentTargetFrameIndex = g_targetFrames.length-1;
-    });
 
     // TODO: Ask if user wants to remove just this keyframe or entire subsequence labelling??
     $("#removeFrameButton").click(function() {
@@ -417,25 +433,6 @@ function loadSequence(
     }
 }
 
-function addLabelButton(label_id, label_name, red, green, blue, parent_id) {
-    var labelButton = {
-        id: label_id,
-        name: label_name,
-        red: red,
-        green: green,
-        blue: blue,
-        parent_id: parent_id,
-    };
-    g_labelButtons.push(labelButton);
-
-    $("#labelButton" + label_id).css("background-color", colorToHexString(red, green, blue));
-
-    // TODO finish
-    if(parent_id != 0) {
-        $('#sublabel_' + parent_id).hide();
-    }
-}
-
 function addKeyFrame(frame_nr) {
     if(g_targetFrames.includes(frame_nr)) // Already exists
         return;
@@ -453,7 +450,6 @@ function setupSliderMark(frame, color) {
     let newMarker = document.createElement('span');
     newMarker.setAttribute('id', 'sliderMarker' + frame);
     $(newMarker).css('background-color', color);
-    // Change from default: As % of slider length to clearly mark subsequences
     $(newMarker).css('width', ''+(100.0/g_sequenceLength)+'%');
     $(newMarker).css('margin-left', $('.ui-slider-handle').css('margin-left'));
     $(newMarker).css('height', '100%');
@@ -473,8 +469,7 @@ function sliderMarkSubsequence(frame, frame_end, color) {
     let newMarker = document.createElement('span');
     newMarker.setAttribute('id', 'sliderMarker' + frame);
     $(newMarker).css('background-color', color);
-    // Change from default: As % of slider length to clearly mark subsequences
-    $(newMarker).css('width', ''+((frame_end-frame)/g_sequenceLength)+'%');
+    $(newMarker).css('width', ''+(100.0*(frame_end-frame)/g_sequenceLength)+'%');
     $(newMarker).css('margin-left', $('.ui-slider-handle').css('margin-left'));
     $(newMarker).css('height', '100%');
     $(newMarker).css('z-index', '99');
@@ -483,6 +478,13 @@ function sliderMarkSubsequence(frame, frame_end, color) {
 
     slider.appendChild(newMarker);
     // console.log('Made marker');
+}
+
+function removeAllSliderMarks() {
+    // remove the subsequences but leave the slider handle
+    $('#slider').children().not('.ui-slider-handle').remove();
+
+    console.log('Removed all markers');
 }
 
 function incrementFrame() {
