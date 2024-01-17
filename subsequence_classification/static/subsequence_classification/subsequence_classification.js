@@ -433,6 +433,25 @@ function loadSequence(
     }
 }
 
+function addLabelButton(label_id, label_name, red, green, blue, parent_id) {
+    var labelButton = {
+        id: label_id,
+        name: label_name,
+        red: red,
+        green: green,
+        blue: blue,
+        parent_id: parent_id,
+    };
+    g_labelButtons.push(labelButton);
+
+    $("#labelButton" + label_id).css("background-color", colorToHexString(red, green, blue));
+
+    // TODO finish
+    if(parent_id != 0) {
+        $('#sublabel_' + parent_id).hide();
+    }
+}
+
 function addKeyFrame(frame_nr) {
     if(g_targetFrames.includes(frame_nr)) // Already exists
         return;
