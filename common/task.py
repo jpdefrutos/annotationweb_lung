@@ -289,15 +289,16 @@ def save_annotation(request):
         if request.method != 'POST':
             raise Exception('ERROR: Must use POST when saving processed image.')
 
-        # Image quality is required
-        if 'quality' not in request.POST:
-            raise Exception('ERROR: You must select image quality.')
-
         image_id = int(request.POST['image_id'])
         task_id = int(request.POST['task_id'])
         new_key_frames = json.loads(request.POST['target_frames'])
         rejected = request.POST['rejected'] == 'true'
         comments = request.POST['comments']
+
+        if task_id != Task.BLIND_CLASSIFICATION:
+            # Image quality is required
+            if 'quality' not in request.POST:
+                raise Exception('ERROR: You must select image quality.')
 
         # Delete old key frames if they exist, this will also delete old annotations
         key_frames = KeyFrameAnnotation.objects.filter(image_annotation__task_id=task_id, image_annotation__image_id=image_id)
@@ -315,7 +316,10 @@ def save_annotation(request):
         annotation.comments = comments
         annotation.user = request.user
         annotation.finished = True
-        annotation.image_quality = request.POST['quality']
+        if annotation.task.type == Task.BLIND_CLASSIFICATION:
+            annotation.image_quality = 'unknown'
+        else:
+            annotation.image_quality = request.POST['quality']
         annotation.save()
 
         annotations = []
