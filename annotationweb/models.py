@@ -43,16 +43,22 @@ class Task(models.Model):
     BOUNDING_BOX = 'boundingbox'
     LANDMARK = 'landmark'
     CARDIAC_SEGMENTATION = 'cardiac_segmentation'
+    CARDIAC_PLAX_SEGMENTATION = 'cardiac_plax_segmentation'
+    CARDIAC_ALAX_SEGMENTATION = 'cardiac_alax_segmentation'
     SPLINE_SEGMENTATION = 'spline_segmentation'
     VIDEO_ANNOTATION = 'video_annotation'
+    SUBSEQUENCE_CLASSIFICATION = 'subsequence_classification'
     TASK_TYPES = (
         (CLASSIFICATION, 'Classification'),
         (BLIND_CLASSIFICATION, 'Blind classification'),
         (BOUNDING_BOX, 'Bounding box'),
         (LANDMARK, 'Landmark'),
         (CARDIAC_SEGMENTATION, 'Cardiac segmentation'),
+        (CARDIAC_PLAX_SEGMENTATION, 'Cardiac PLAX segmentation'),
+        (CARDIAC_ALAX_SEGMENTATION, 'Cardiac ALAX segmentation'),
         (SPLINE_SEGMENTATION, 'Spline segmentation'),
-        (VIDEO_ANNOTATION, 'Video annotation')
+        (VIDEO_ANNOTATION, 'Video annotation'),
+        (SUBSEQUENCE_CLASSIFICATION, 'Subsequence classification')
     )
 
     name = models.CharField(max_length=200)
@@ -98,14 +104,7 @@ class Task(models.Model):
         else:
             return round(self.number_of_annotated_images*100 / self.total_number_of_images, 1)
 
-        # task.total_number_of_images = ImageSequence.objects.filter(subject__dataset__task=task.id).count()
-        # task.number_of_annotated_images = ImageSequence.objects.filter(imageannotation__in=ImageAnnotation.objects.filter(task_id=task.id)).count()
-        #
-        # if task.total_number_of_images == 0:
-        #     task.percentage_finished = 0
-        # else:
-        #     task.percentage_finished = round(task.number_of_annotated_images*100 /
-        #                                      task.total_number_of_images, 1)
+
 
 class ImageSequence(models.Model):
     format = models.CharField(max_length=1024, help_text='Should contain # which will be replaced with an integer, '

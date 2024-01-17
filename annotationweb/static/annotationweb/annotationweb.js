@@ -234,7 +234,7 @@ function goToPreviousKeyFrame() {
 }
 function loadSequence(image_sequence_id, start_frame, nrOfFrames, show_entire_sequence, user_frame_selection, annotate_single_frame, frames_to_annotate, images_to_load_before, images_to_load_after, auto_play) {
     // If user cannot select frame, and there are no target frames, select last frame as target frame
-    if(!user_frame_selection && annotate_single_frame && frames_to_annotate.length === 0) {
+    if(user_frame_selection && annotate_single_frame && frames_to_annotate.length === 0) {
         // Select last frame as target frame
         frames_to_annotate.push(nrOfFrames-1);
     }
@@ -280,6 +280,8 @@ function loadSequence(image_sequence_id, start_frame, nrOfFrames, show_entire_se
     }
     g_startFrame = start;
     g_sequenceLength = end-start;
+    console.log(g_startFrame);
+    console.log(g_sequenceLength);
     console.log("Start frame = " + toString(g_startFrame) + ", sequence length = " + toString(g_sequenceLength));
 
     // Create slider

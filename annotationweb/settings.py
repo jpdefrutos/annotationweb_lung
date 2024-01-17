@@ -24,7 +24,7 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # python manage.py shell -c 'from django.core.management import utils; print(utils.get_random_secret_key())'
 # You can safely change this at any time, but note that logged in users will be logged out.
 # See more info here: https://medium.com/@bayraktar.eralp/changing-rotating-django-secret-key-without-logging-users-out-804a29d3ea65
-#SECRET_KEY = 'insert secret key her!'
+SECRET_KEY = 'insert secret key her!'
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
@@ -49,7 +49,10 @@ INSTALLED_APPS = [
     'user',
     'cardiac',
     'spline_segmentation',
+    'cardiac_parasternal_long_axis',
+    'cardiac_apical_long_axis',
     'video_annotation',
+    'subsequence_classification',
     'django_otp',
     'django_otp.plugins.otp_totp',
 ]

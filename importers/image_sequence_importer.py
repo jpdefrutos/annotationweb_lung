@@ -65,7 +65,7 @@ class ImageSequenceImporter(Importer):
                     continue
 
                 # Count nr of frames
-                # Handle only monotype sequence: .mhd or .png
+                # Handle only monotype sequence: .mhd or .png or .jpg
                 frames = []
                 extension = None
                 name = ''
@@ -86,6 +86,14 @@ class ImageSequenceImporter(Importer):
                             extension = '.png'
                         else:
                             raise Exception('Found both mhd and png images in the same folder.')
+                    elif file3[-4:] == '.jpg':
+                        image_filename = join(image_sequence_dir, file3)
+                        frames.append(image_filename)
+                        name = file3[:file3.rfind('_')]
+                        if extension is None or extension == '.jpg':
+                            extension = '.jpg'
+                        else:
+                            raise Exception('Found both jpg and mhd/png images in the same folder.')
 
                 if len(frames) == 0:
                     continue
