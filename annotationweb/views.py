@@ -449,7 +449,7 @@ def task_description(request, task_id):
     elif task.type == task.CARDIAC_ALAX_SEGMENTATION:
         url = reverse('cardiac_apical_long_axis:segment_image', args=[task_id])
     elif task.type == task.SUBSEQUENCE_CLASSIFICATION:
-        url = reverse('subsequence_classification:label_image', args=[task_id])
+        url = reverse('subsequence_classification:label_subsequence', args=[task_id])
     else:
         raise NotImplementedError()
 
