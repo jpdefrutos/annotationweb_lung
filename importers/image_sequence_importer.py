@@ -1,3 +1,5 @@
+from os import listdir
+
 from common.importer import Importer
 from django import forms
 from annotationweb.models import ImageSequence, Dataset, Subject, ImageMetadata
@@ -59,85 +61,100 @@ class ImageSequenceImporter(Importer):
                 subject.dataset = self.dataset
                 subject.save()
 
-            for file2 in os.listdir(subject_dir):
-                image_sequence_dir = join(subject_dir, file2)
+            for sequence_dir in os.listdir(subject_dir):
+                image_sequence_dir = join(subject_dir, sequence_dir)
                 if not os.path.isdir(image_sequence_dir):
                     continue
 
-                # Count nr of frames
-                # Handle only monotype sequence: .mhd or .png or .jpg
-                frames = []
-                extension = None
-                name = ''
-                for file3 in os.listdir(image_sequence_dir):
-                    if file3[-4:] == '.mhd':
-                        image_filename = join(image_sequence_dir, file3)
-                        frames.append(image_filename)
-                        name = file3[:file3.rfind('_')]
-                        if extension is None or extension == '.mhd':
-                            extension = '.mhd'
-                        else:
-                            raise Exception('Found both mhd and png images in the same folder.')
-                    elif file3[-4:] == '.png':
-                        image_filename = join(image_sequence_dir, file3)
-                        frames.append(image_filename)
-                        name = file3[:file3.rfind('_')]
-                        if extension is None or extension == '.png':
-                            extension = '.png'
-                        else:
-                            raise Exception('Found both mhd and png images in the same folder.')
-                    elif file3[-4:] == '.jpg':
-                        image_filename = join(image_sequence_dir, file3)
-                        frames.append(image_filename)
-                        name = file3[:file3.rfind('_')]
-                        if extension is None or extension == '.jpg':
-                            extension = '.jpg'
-                        else:
-                            raise Exception('Found both jpg and mhd/png images in the same folder.')
+                frames, name, extension = self._parse_sequence_dir(image_sequence_dir)
 
                 if len(frames) == 0:
                     continue
 
                 filename_format = join(image_sequence_dir, name + '_#')
                 filename_format += extension
-                try:
-                    # Check to see if sequence exist
-                    image_sequence = ImageSequence.objects.get(format=filename_format, subject=subject)
-                    # Check to see that nr of sequences is correct
-                    if image_sequence.nr_of_frames < len(frames):
-                        # Delete this sequnce, and redo it
-                        image_sequence.delete()
-                        # Create new
-                        image_sequence = ImageSequence()
-                        image_sequence.format = filename_format
-                        image_sequence.subject = subject
-                        image_sequence.nr_of_frames = len(frames)
-                        image_sequence.save()
-                    else:
-                        # Skip importing data, as this has already have been done
-                        continue
-                except ImageSequence.DoesNotExist:
-                    # Create new image sequence
-                    image_sequence = ImageSequence()
-                    image_sequence.format = filename_format
-                    image_sequence.subject = subject
-                    image_sequence.nr_of_frames = len(frames)
-                    image_sequence.save()
 
-                # Check if metadata.txt exists, and if so parse it and add
-                metadata_filename = join(image_sequence_dir, 'metadata.txt')
-                if os.path.exists(metadata_filename):
-                    with open(metadata_filename, 'r') as f:
-                        for line in f:
-                            parts = line.split(':')
-                            if len(parts) != 2:
-                                raise Exception('Excepted 2 parts when spliting metadata in file ' + metadata_filename)
+                image_sequence, already_imported = self._import_image_sequence(frames, subject, filename_format)
+                if already_imported:
+                    continue
 
-                            # Save to DB
-                            metadata = ImageMetadata()
-                            metadata.image = image_sequence
-                            metadata.name = parts[0].strip()
-                            metadata.value = parts[1].strip()
-                            metadata.save()
+                _ = self._import_metadata(image_sequence_dir, image_sequence)
 
         return True, path
+
+    def _parse_sequence_dir(self, image_sequence_dir):
+        # Count nr of frames
+        # Handle only monotype sequence: .mhd or .png or .jpg
+        name = None
+        frames = list()
+        extension = None
+        for frame_file in os.listdir(image_sequence_dir):
+            if frame_file[-4:] == '.mhd':
+                image_filename = join(image_sequence_dir, frame_file)
+                frames.append(image_filename)
+                name = frame_file[:frame_file.rfind('_')]
+                if extension is None or extension == '.mhd':
+                    extension = '.mhd'
+                else:
+                    raise Exception('Found both mhd and png images in the same folder.')
+            elif frame_file[-4:] == '.png':
+                image_filename = join(image_sequence_dir, frame_file)
+                frames.append(image_filename)
+                name = frame_file[:frame_file.rfind('_')]
+                if extension is None or extension == '.png':
+                    extension = '.png'
+                else:
+                    raise Exception('Found both mhd and png images in the same folder.')
+            elif frame_file[-4:] == '.jpg':
+                image_filename = join(image_sequence_dir, frame_file)
+                frames.append(image_filename)
+                name = frame_file[:frame_file.rfind('_')]
+                if extension is None or extension == '.jpg':
+                    extension = '.jpg'
+                else:
+                    raise Exception('Found both jpg and mhd/png images in the same folder.')
+        return frames, name, extension
+
+    def _import_image_sequence(self, frames, subject, filename_format):
+        sequence_already_imported = False
+        try:
+            # Check to see if sequence exist
+            image_sequence = ImageSequence.objects.get(format=filename_format, subject=subject)
+            # Check to see that nr of sequences is correct
+            if image_sequence.nr_of_frames < len(frames):
+                # Delete this sequnce, and redo it
+                image_sequence.delete()
+                # Create new
+                image_sequence = ImageSequence()
+                image_sequence.format = filename_format
+                image_sequence.subject = subject
+                image_sequence.nr_of_frames = len(frames)
+                image_sequence.save()
+            else:
+                sequence_already_imported = True
+        except ImageSequence.DoesNotExist:
+            # Create new image sequence
+            image_sequence = ImageSequence()
+            image_sequence.format = filename_format
+            image_sequence.subject = subject
+            image_sequence.nr_of_frames = len(frames)
+            image_sequence.save()
+        return image_sequence, sequence_already_imported
+
+    def _import_metadata(self, image_sequence_dir, image_sequence):
+        metadata = None
+        metadata_filename = join(image_sequence_dir, 'metadata.txt')
+        if os.path.exists(metadata_filename):
+            with open(metadata_filename, 'r') as f:
+                for line in f:
+                    parts = line.split(':')
+                    if len(parts) != 2:
+                        raise Exception('Excepted 2 parts when spliting metadata in file ' + metadata_filename)
+
+                    # Save to DB
+                    metadata = ImageMetadata()
+                    metadata.image = image_sequence
+                    metadata.name = parts[0].strip()
+                    metadata.value = parts[1].strip()
+                    metadata.save()
+        return metadata
