@@ -1,3 +1,4 @@
+from django.core.validators import validate_comma_separated_integer_list
 from django.db import models
 from django.contrib.auth.models import User
 
@@ -162,3 +163,30 @@ class ImageMetadata(models.Model):
 
     def __str__(self):
         return self.name + ': ' + self.value
+
+
+class VolumetricImage(models.Model):
+    format = models.CharField(max_length=1024, help_text='Should contain # which will be replaced with an integer, '
+                                                         'increasing with 1 for each frame. E.g. /path/to/frame_#.png')
+    subject = models.ForeignKey(Subject, on_delete=models.CASCADE)
+
+
+class TrackingData(models.Model):
+    timestamp = models.PositiveIntegerField()
+    branch_number = models.PositiveIntegerField()
+    position_in_branch = models.FloatField()
+    branch_length = models.FloatField()
+    branch_generation = models.PositiveIntegerField()
+    branch_code = models.CharField(max_length=150, validators=[validate_comma_separated_integer_list])
+    offset = models.FloatField()
+    ultrasound_sequence = models.ForeignKey(ImageSequence, on_delete=models.CASCADE, related_name='ultrasound_sequence', blank=True, null=True)
+    video_sequence = models.ForeignKey(ImageSequence, on_delete=models.CASCADE, related_name='video_sequence', blank=True, null=True)
+    subject = models.ForeignKey(Subject, on_delete=models.CASCADE)
+
+    def clean(self, *args, **kwargs):
+        super().clean(*args, **kwargs)
+        return self.ultrasound_sequence != self.video_sequence
+    
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
