@@ -79,7 +79,7 @@ class CustusPatientImporter(Importer):
     def get_form(self, data=None):
         return CustusPatientImporterForm(data)
 
-    def import_data(self, form):
+    def import_data(self, form: forms.Form):
         self.patient_folder = form.cleaned_data['path']
         self.create_table = form.cleaned_data['create_table']
         self.convert_nifti = form.cleaned_data['convert_nifti']
@@ -115,7 +115,7 @@ class CustusPatientImporter(Importer):
         return True, imported_patient_dir
 
     @staticmethod
-    def _populate_trackingdata_entry(tracking_data_obj, data_dict):
+    def _populate_trackingdata_entry(tracking_data_obj: TrackingData, data_dict: dict):
         tracking_data_obj.timestamp = int(data_dict['Timestamp'])
         tracking_data_obj.branch_number = int(data_dict['Branch number'])
         tracking_data_obj.position_in_branch = float(data_dict['Position in branch'])
@@ -124,7 +124,7 @@ class CustusPatientImporter(Importer):
         tracking_data_obj.branch_code = data_dict['Branch code']
         tracking_data_obj.offset = float(data_dict['Offset [mm]'])
 
-    def import_tracking_file(self, tracking_files: list, subject, image_sequences):
+    def import_tracking_file(self, tracking_files: list, subject, image_sequences: list):
         """
         Parse a tracking file and populate the table.
         Parameters:
@@ -160,7 +160,8 @@ class CustusPatientImporter(Importer):
                 ret_val[sequence_name].append([sequence_type, sequence])
         return ret_val
 
-    def import_volumetric_image(self, images_paths: list, subject):
+    @staticmethod
+    def import_volumetric_image(images_paths: list, subject: Subject):
         ret_val = list()
         for f in images_paths:
             try:
@@ -173,7 +174,8 @@ class CustusPatientImporter(Importer):
             ret_val.append(new_entry)
         return ret_val
 
-    def import_sequences(self, sequences: list, subject):
+    @staticmethod
+    def import_sequences(sequences: list, subject: Subject):
         ret_val = list()
         for (sequence_name, sequence_dir, sequence_type) in sequences:
             frames, _, extension  = ImageSequenceImporter()._parse_sequence_dir(sequence_dir)
@@ -273,8 +275,7 @@ class CustusPatientImporter(Importer):
 
         return patient_name, image_paths, list_sequences, tracking_files
 
-    def _is_valid_sequence_file(self, file_path, sequence_name, return_extension: bool = False):
-        extension = file_path.split('.')[-1]
+    def _is_valid_sequence_file(self, file_path: str, sequence_name: str, return_extension: bool = False):
         re_match = re.match(f'{sequence_name}{self.REG_EXP_SEQUENCE}', file_path)
         ret_val = False
         if re_match:
