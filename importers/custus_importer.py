@@ -5,7 +5,6 @@ import numpy as np
 import os
 import csv
 import sqlite3
-import nibabel as nib
 from plum.exceptions import ImplementationError
 from typing import Union, Tuple, List
 from xml.dom import minidom
@@ -226,9 +225,11 @@ class CustusPatientImporter(Importer):
         for (f, e) in volumetric_images:
             if self.convert_nifti:
                 try:
-                    nifti_vol = nib.load(f)
+                    sitk_reader = sitk.ImageFileReader()
+                    sitk_reader.SetFileName(f)
+
                     nifti_filename = os.path.split(f)[-1].replace(f'.{e}', '.nii.gz')
-                    nib.save(nifti_vol, os.path.join(images_dest_folder, nifti_filename))
+                    sitk.WriteImage(sitk_reader.Execute(), nifti_filename, useCompression=True)
                     list_images.append(os.path.join(images_dest_folder, nifti_filename))
                 except IOError as err:
                     print(f'Failed to convert to Nifti. Saving original file instead: {err}')
