@@ -17,6 +17,7 @@ from importers.image_sequence_importer import ImageSequenceImporter, ImageSequen
 from shutil import copy2, copytree
 from common.importer import Importer, importers
 from django import forms
+import SimpleITK as sitk
 
 
 ROOT_PATH = os.path.join(BASE_DIR, 'imported_data')
@@ -202,12 +203,20 @@ class CustusPatientImporter(Importer):
         sequences_folder = os.path.join(dest_folder, 'Sequences')
         os.makedirs(sequences_folder, exist_ok=True)
         list_sequences = list()
+        sitk_reader = sitk.ImageFileReader()
+        sitk_reader.SetImageIO("MetaImageIO")
         for (sequence_name, sequence_files, sequence_type) in sequences:
             r_dest_folder = os.path.join(sequences_folder, f'{sequence_type}_{sequence_name}')
             os.makedirs(r_dest_folder, exist_ok=True)
             # TODO: check for duplicates
-            for i, f in enumerate(sequence_files):
-                copy2(f, os.path.join(r_dest_folder, f'{sequence_type}_{sequence_name}_{i:01d}.{f.split(".")[-1]}'))
+            for f in sequence_files:
+                old_filename, ext = os.path.split(f)[-1].split('.')
+                i = int(old_filename.split('_')[-1])
+                if ext == "mhd":
+                    out_filename = os.path.join(r_dest_folder, f'{sequence_type}_{sequence_name}_{i:01d}.{ext}')
+                    sitk_reader.SetFileName(f)
+                    sitk.WriteImage(sitk_reader.Execute(), out_filename, useCompression=True)
+
             list_sequences.append((sequence_name, r_dest_folder, sequence_type))
 
         # Move images
