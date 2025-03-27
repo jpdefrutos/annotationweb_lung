@@ -162,20 +162,26 @@ function propagateModification(frame_nr, x, y, x2, y2, label, create, erase) {
 function annotationExists(frame_nr, x, y, x2, y2, label, create, erase) {
     if (!(frame_nr in g_boxes)) {
         // If the frame has no annotations, then create a new one
-        if (create)
+        if (create) {
             addBox(frame_nr, x, y, x2, y2, label);
+            addKeyFrame(frame_nr);
+        }
     } else {
         // If the frame already has annotations, check them and update/create/remove one with the given information
         g_bbox_found = false;
         //Update or remove
         g_boxes[frame_nr].forEach((bbox, idx, obj) => findBoxAndUpdate(bbox, x, y, x2, y2, label, !erase, idx, obj))
         // Clean up after removeBox
-        if (g_boxes[frame_nr].length === 0)
+        if (g_boxes[frame_nr].length === 0) {
             delete g_boxes[frame_nr];
+            removeKeyFrame(frame_nr);
+        }
 
-        if (!g_bbox_found && create)
+        if (!g_bbox_found && create){
             // The entry  frame_nr has boxes but not the one we are looking for, but we want to create it
             addBox(frame_nr, x, y, x2, y2, label);
+            addKeyFrame(frame_nr);
+        }
     }
 }
 
@@ -269,7 +275,7 @@ function range(start = 0, stop, step = 1) {
 function sendDataForSave() {
     return $.ajax({
         type: "POST",
-        url: "/boundingbox/save/",
+        url: "/video-annotation/save/",
         data: {
             image_id: g_imageID,
             boxes: JSON.stringify(g_boxes),

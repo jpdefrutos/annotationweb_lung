@@ -195,6 +195,16 @@ function addKeyFrame(frame_nr, color) {
     $("#framesForm").append('<input id="selectedFramesForm' + frame_nr + '" type="hidden" name="frames" value="' + frame_nr + '">');
 }
 
+function removeKeyFrame(frame_nr) {
+    if(g_targetFrames.includes(frame_nr)) {
+        g_targetFrames.splice(g_targetFrames.indexOf(frame_nr), 1);
+        g_currentTargetFrameIndex = -1;
+        $('#sliderMarker' + frame_nr).remove();
+        $('#selectedFrames' + frame_nr).remove();
+        $('#selectedFramesForm' + frame_nr).remove();
+    }
+}
+
 function goToNextKeyFrame() {
     if(g_targetFrames.length === 0)
         return;
@@ -332,13 +342,14 @@ function loadSequence(image_sequence_id, start_frame, nrOfFrames, show_entire_se
 
     $("#removeFrameButton").click(function() {
         setPlayButton(false);
-        if(g_targetFrames.includes(g_currentFrameNr)) {
-            g_targetFrames.splice(g_targetFrames.indexOf(g_currentFrameNr), 1);
-            g_currentTargetFrameIndex = -1;
-            $('#sliderMarker' + g_currentFrameNr).remove();
-            $('#selectedFrames' + g_currentFrameNr).remove();
-            $('#selectedFramesForm' + g_currentFrameNr).remove();
-        }
+        removeKeyFrame(g_currentFrameNr);
+        // if(g_targetFrames.includes(g_currentFrameNr)) {
+        //     g_targetFrames.splice(g_targetFrames.indexOf(g_currentFrameNr), 1);
+        //     g_currentTargetFrameIndex = -1;
+        //     $('#sliderMarker' + g_currentFrameNr).remove();
+        //     $('#selectedFrames' + g_currentFrameNr).remove();
+        //     $('#selectedFramesForm' + g_currentFrameNr).remove();
+        // }
     });
 
 

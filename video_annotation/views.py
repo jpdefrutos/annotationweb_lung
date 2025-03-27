@@ -63,7 +63,7 @@ def save_boxes(request):
     except Exception as e:
         response = {
             'success': 'false',
-            'message': str(e)
+            'message': f'Keyframe {str(e)}'
         }
 
     return JsonResponse(response)
