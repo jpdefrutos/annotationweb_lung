@@ -5,6 +5,8 @@ import numpy as np
 import os
 import csv
 import sqlite3
+
+import warnings
 from plum.exceptions import ImplementationError
 from typing import Union, Tuple, List
 from xml.dom import minidom
@@ -25,6 +27,14 @@ class CustusPatientImporterForm(forms.Form):
     path = forms.CharField(label='Data path', max_length=1000)
     create_table = forms.BooleanField(label='Create table', required=False)
     convert_nifti = forms.BooleanField(label='Convert images to Nifti', required=False)
+    image_formats = forms.MultipleChoiceField(label='Accepted 3D image formats', required=True,
+                                              initial=['vtk','dcm','nii','nii.gz','mhd'],
+                                              choices=[('vtk', 'VTK'),
+                                                       ('dcm', 'Dicom'),
+                                                       ('nii', 'Nifti'),
+                                                       ('nii.gz', 'Compressed nifti'),
+                                                       ('mhd', 'Meta Header')],
+                                              widget=forms.CheckboxSelectMultiple())
 
     def __init__(self, data=None):
         super(CustusPatientImporterForm, self).__init__(data)
@@ -34,6 +44,7 @@ class CustusPatientImporterForm(forms.Form):
         patient_folder = self.cleaned_data.get('path')
         create_table = self.cleaned_data.get('create_table')
         convert_nifti = self.cleaned_data.get('convert_nifti')
+        image_formats = self.cleaned_data.get('image_formats')
 
         if not os.path.exists(patient_folder):
             self._errors['path'] = self.error_class([f'Patient folder {patient_folder} does not exist'])
@@ -44,15 +55,20 @@ class CustusPatientImporterForm(forms.Form):
         if convert_nifti is None:
             self.cleaned_data['convert_nifti'] = False
 
+        if image_formats is None:
+            self.cleaned_data['image_formats'] = False
+        elif 'mhd' in image_formats:
+            self.cleaned_data['image_formats'] += ['zraw', 'raw']
+
         return self.cleaned_data
 
 
 class CustusPatientImporter(Importer):
     HEADER = ('Timestamp','Branch number', 'Position in branch', 'Branch length', 'Branch generation', 'branchCode', 'Offset [mm]')
     DELIMITER = ';'
-    IMAGE_FORMATS = ('vtk', 'dcm', 'nii', 'nii.gz', 'mhd', 'zraw')
+    ALL_IMG_FORMATS = ('vtk', 'dcm', 'nii', 'nii.gz', 'mhd', 'zraw', 'raw')
     DICT_SEQUENCE_TYPES = {'US_Acq': 'US', 'BronchoscopyVideo': 'BV'}
-    REG_EXP_ACCEPTED_FILES = f'\.({"|".join(IMAGE_FORMATS)})$'# f'\_.+\d+\.({"|".join(IMAGE_FORMATS)})'
+    REG_EXP_ACCEPTED_VOL_IMAGES = f'\.({"|".join(ALL_IMG_FORMATS)})$'# f'\_.+\d+\.({"|".join(IMAGE_FORMATS)})'
     TRACKING_FIELDNAMES = ['Timestamp',
                            'Branch number',
                            'Position in branch',
@@ -65,6 +81,8 @@ class CustusPatientImporter(Importer):
     create_table = None
     dataset = None
     convert_nifti = False
+    image_formats = ALL_IMG_FORMATS
+    import_vol_images = True
 
     name = "Custus patient importer"
 
@@ -83,6 +101,14 @@ class CustusPatientImporter(Importer):
         self.patient_folder = form.cleaned_data['path']
         self.create_table = form.cleaned_data['create_table']
         self.convert_nifti = form.cleaned_data['convert_nifti']
+        self.image_formats = form.cleaned_data['image_formats']
+
+        if self.image_formats:
+            self.REG_EXP_ACCEPTED_VOL_IMAGES = f'\.({"|".join(self.image_formats)})$'
+            self.import_vol_images = True
+        else:
+            warnings.warn('No volumetric images will be imported. No format was selected!')
+            self.import_vol_images = False
 
         if self.dataset is None:
             raise Exception('Dataset must be given to the importer')
@@ -223,21 +249,26 @@ class CustusPatientImporter(Importer):
         os.makedirs(images_dest_folder, exist_ok=True)
         list_images = list()
         for (f, e) in volumetric_images:
-            if self.convert_nifti:
-                try:
-                    sitk_reader = sitk.ImageFileReader()
-                    sitk_reader.SetFileName(f)
+            if os.path.exists(f):
+                if self.convert_nifti:
+                    try:
+                        sitk_reader = sitk.ImageFileReader()
+                        sitk_reader.SetFileName(f)
 
-                    nifti_filename = os.path.split(f)[-1].replace(f'.{e}', '.nii.gz')
-                    sitk.WriteImage(sitk_reader.Execute(), nifti_filename, useCompression=True)
-                    list_images.append(os.path.join(images_dest_folder, nifti_filename))
-                except IOError as err:
-                    print(f'Failed to convert to Nifti. Saving original file instead: {err}')
+                        nifti_filename = os.path.split(f)[-1].replace(f'.{e}', '.nii.gz')
+                        dest_filepath = os.path.join(images_dest_folder, nifti_filename)
+                        sitk.WriteImage(sitk_reader.Execute(), dest_filepath, useCompression=True)
+                        list_images.append(dest_filepath)
+                    except (IOError, RuntimeError) as err:
+                        print(f'Failed to convert to Nifti. Saving original file instead: {err}')
+                        dest_filepath = os.path.join(images_dest_folder, os.path.split(f)[-1])
+                        copy2(f, dest_filepath)
+                        list_images.append(dest_filepath)
+                else:
                     copy2(f, os.path.join(images_dest_folder, os.path.split(f)[-1]))
                     list_images.append(os.path.join(images_dest_folder, os.path.split(f)[-1]))
             else:
-                copy2(f, os.path.join(images_dest_folder, os.path.split(f)[-1]))
-                list_images.append(os.path.join(images_dest_folder, os.path.split(f)[-1]))
+                warnings.warn(f'File not found: {f}')
 
         return dest_folder, list_sequences, list_images
 
@@ -260,12 +291,13 @@ class CustusPatientImporter(Importer):
         list_sequences = list()
 
         # Fetch 3D images or data
-        for i in images:
-            if i.getAttribute('type') in ('mesh', 'image'):
-                img_path = os.path.join(patient_folder, i.getElementsByTagName('filePath')[0].childNodes[0].data).replace('/', '\\')
-                is_valid, img_extension = self._is_valid_file(img_path, True)
-                if is_valid:
-                    image_paths.append((img_path, img_extension))
+        if self.import_vol_images:
+            for i in images:
+                if i.getAttribute('type') in ('mesh', 'image'):
+                    img_path = os.path.join(patient_folder, i.getElementsByTagName('filePath')[0].childNodes[0].data).replace('/', '\\')
+                    is_valid, img_extension = self._is_valid_file(img_path, True)
+                    if is_valid:
+                        image_paths.append((img_path, img_extension))
 
         # Fetch US, video, or other type of sequences
         for seq in sequences:
@@ -288,7 +320,7 @@ class CustusPatientImporter(Importer):
         return patient_name, image_paths, list_sequences, tracking_files
 
     def _is_valid_sequence(self, file_path: str, sequence_name: str, return_extension: bool = False):
-        re_match = re.match(f'{sequence_name}_.+\d+{self.REG_EXP_ACCEPTED_FILES}', file_path)
+        re_match = re.match(f'{sequence_name}_.+\d+\.(mhd|zraw)$', file_path)
         ret_val = False
         if re_match:
             ret_val = True
@@ -297,12 +329,10 @@ class CustusPatientImporter(Importer):
         return ret_val
 
     def _is_valid_file(self, file_path: str, return_extension: bool = False):
-        re_match = re.match(f'.*{self.REG_EXP_ACCEPTED_FILES}', os.path.split(file_path)[-1])
-        ret_val = False
-        if re_match:
-            ret_val = True
-            if return_extension:
-                ret_val = (ret_val, re_match[1])
+        re_match = re.match(f'.*{self.REG_EXP_ACCEPTED_VOL_IMAGES}', os.path.split(file_path)[-1])
+        ret_val = bool(re_match)
+        if return_extension:
+            ret_val = (ret_val, re_match[1] if re_match else None)
         return ret_val
 
 
