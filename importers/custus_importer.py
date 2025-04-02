@@ -52,7 +52,7 @@ class CustusPatientImporter(Importer):
     DELIMITER = ';'
     IMAGE_FORMATS = ('vtk', 'dcm', 'nii', 'nii.gz', 'mhd', 'zraw')
     DICT_SEQUENCE_TYPES = {'US_Acq': 'US', 'BronchoscopyVideo': 'BV'}
-    REG_EXP_SEQUENCE = f'\_.+\d+\.({"|".join(IMAGE_FORMATS)})'
+    REG_EXP_ACCEPTED_FILES = f'\.({"|".join(IMAGE_FORMATS)})$'# f'\_.+\d+\.({"|".join(IMAGE_FORMATS)})'
     TRACKING_FIELDNAMES = ['Timestamp',
                            'Branch number',
                            'Position in branch',
@@ -259,19 +259,21 @@ class CustusPatientImporter(Importer):
         sequences = custusdoc.getElementsByTagName('recordSession')
         list_sequences = list()
 
+        # Fetch 3D images or data
         for i in images:
             if i.getAttribute('type') in ('mesh', 'image'):
-                img_path = os.path.join(patient_folder, i.getElementsByTagName('filePath')[0].childNodes[0].data)
-                img_extension, is_valid = self._is_valid_sequence_file(img_path)
+                img_path = os.path.join(patient_folder, i.getElementsByTagName('filePath')[0].childNodes[0].data).replace('/', '\\')
+                is_valid, img_extension = self._is_valid_file(img_path, True)
                 if is_valid:
                     image_paths.append((img_path, img_extension))
 
+        # Fetch US, video, or other type of sequences
         for seq in sequences:
             sequence_type = seq.getElementsByTagName('category')[0].childNodes[0].data
             if sequence_type in self.DICT_SEQUENCE_TYPES.keys():
                 sequence_name = seq.getAttribute('uid')
                 sequence_folder = os.path.join(patient_folder, 'US_Acq', f'{sequence_type}_{sequence_name.lstrip("0")}')
-                sequence_files = [os.path.join(sequence_folder, f) for f in os.listdir(sequence_folder) if self._is_valid_sequence_file(f, f'{sequence_type}_{sequence_name.lstrip("0")}'.replace('_', '\_'))]
+                sequence_files = [os.path.join(sequence_folder, f) for f in os.listdir(sequence_folder) if self._is_valid_sequence(f, f'{sequence_type}_{sequence_name.lstrip("0")}'.replace('_', '\_'))]
                 sequence_files.sort()
                 list_sequences.append([sequence_name,
                                        sequence_files,
@@ -285,8 +287,17 @@ class CustusPatientImporter(Importer):
 
         return patient_name, image_paths, list_sequences, tracking_files
 
-    def _is_valid_sequence_file(self, file_path: str, sequence_name: str, return_extension: bool = False):
-        re_match = re.match(f'{sequence_name}{self.REG_EXP_SEQUENCE}', file_path)
+    def _is_valid_sequence(self, file_path: str, sequence_name: str, return_extension: bool = False):
+        re_match = re.match(f'{sequence_name}_.+\d+{self.REG_EXP_ACCEPTED_FILES}', file_path)
+        ret_val = False
+        if re_match:
+            ret_val = True
+            if return_extension:
+                ret_val = (ret_val, re_match[1])
+        return ret_val
+
+    def _is_valid_file(self, file_path: str, return_extension: bool = False):
+        re_match = re.match(f'.*{self.REG_EXP_ACCEPTED_FILES}', os.path.split(file_path)[-1])
         ret_val = False
         if re_match:
             ret_val = True
