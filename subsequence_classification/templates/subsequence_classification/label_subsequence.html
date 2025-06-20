@@ -21,7 +21,7 @@
         );
     {% endif %}
 
-
+    loadSubsequenceClassificationTask({{ image_sequence.id }});
 
     {# Add label buttons #}
     {% for label in labels %}
@@ -35,7 +35,6 @@
     {% endfor %}
     updateFrameLabelVariables();
 
-    loadSubsequenceClassificationTask({{ image_sequence.id }});
 
     {% if return_url %}
         setReturnURL('{{ return_url|safe }}');
@@ -110,7 +109,6 @@
     {% if toplabels|length > 1 %}
     <h3>Labels</h3>
 
-{% comment %}
     <div id="labelButtons">
         {% block label_buttons %}
             <div class="flexButtons">
@@ -132,30 +130,6 @@
 
         {% endblock label_buttons %}
     </div>
-{% endcomment %}
-
-
-    <div id="labelButtons">
-    {% block label_buttons %}
-        <div class="flexButtons">
-            {% for label in toplabels %}
-                <button class="labelButton" data-label-id="{{ label.id }}" id="labelButton{{ label.id }}">{{ label.name }}</button>
-            {% endfor %}
-        </div>
-
-        {% for sublabel in sublabels %}
-            <div id="sublabel_{{ sublabel.id }}">
-                <hr>
-                <div class="flexButtons">
-                        {% for label in sublabel.labels %}
-                            <button class="labelButton" data-label-id="{{ label.id }}" id="labelButton{{ label.id }}">{{ label.name }}</button>
-                        {% endfor %}
-                    </div>
-                </div>
-            {% endfor %}
-        {% endblock label_buttons %}
-    </div>
-
 
     <h3>Mark subsequence </h3>
 
