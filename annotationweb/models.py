@@ -67,7 +67,7 @@ class Task(models.Model):
     show_entire_sequence = models.BooleanField(help_text='Allow user to see entire sequence.', default=False)
     frames_before = models.PositiveIntegerField(help_text='How many frames to allow user to see before a key frame', default=0)
     frames_after = models.PositiveIntegerField(help_text='How many frames to allow user to see after a key frame', default=0)
-    auto_play = models.BooleanField(help_text='Auto play image sequences', default=True)
+    auto_play = models.BooleanField(help_text='Auto play image sequences', default=False)
     shuffle_videos = models.BooleanField(help_text='Shuffle videos for annotation task', default=True)
     user_frame_selection = models.BooleanField(help_text='Annotaters can select which frames to annotate in a video', default=False)
     annotate_single_frame = models.BooleanField(help_text='Annotate a single frame at a time in videos', default=True)
@@ -187,6 +187,33 @@ class TrackingData(models.Model):
         super().clean(*args, **kwargs)
         return self.ultrasound_sequence != self.video_sequence
     
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+
+class TrackingDataSync(models.Model):
+    filename = models.CharField(max_length=200)
+    timestamp_from_fts = models.PositiveIntegerField(null=True, blank=True)
+    matching_timestamp_from_txt = models.FloatField(null=True, blank=True)# PositiveIntegerField()
+    branch_number = models.FloatField(null=True, blank=True)
+    position_in_branch = models.FloatField(null=True, blank=True)
+    branch_length = models.FloatField(null=True, blank=True)
+    branch_generation = models.FloatField(null=True, blank=True)
+    #branch_code = models.CharField(max_length=150, validators=[validate_comma_separated_integer_list], null=True, blank=True)
+    branch_code = models.CharField(max_length=150, null=True, blank=True)
+    offset = models.FloatField(null=True, blank=True)
+    #ultrasound_sequence = models.ForeignKey(ImageSequence, on_delete=models.CASCADE, related_name='ultrasound_sequence',
+    #                                        blank=True, null=True)
+    #video_sequence = models.ForeignKey(ImageSequence, on_delete=models.CASCADE, related_name='video_sequence',
+    #                                   blank=True, null=True)
+
+    subject = models.ForeignKey(Subject, on_delete=models.CASCADE)
+
+    #def clean(self, *args, **kwargs):
+    #    super().clean(*args, **kwargs)
+    #    return self.ultrasound_sequence != self.video_sequence
+
     def save(self, *args, **kwargs):
         self.full_clean()
         super().save(*args, **kwargs)
