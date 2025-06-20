@@ -106,7 +106,6 @@ class Task(models.Model):
             return round(self.number_of_annotated_images*100 / self.total_number_of_images, 1)
 
 
-
 class ImageSequence(models.Model):
     format = models.CharField(max_length=1024, help_text='Should contain # which will be replaced with an integer, '
                                                          'increasing with 1 for each frame. E.g. /path/to/frame_#.png')

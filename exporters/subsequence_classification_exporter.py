@@ -97,9 +97,12 @@ class SubsequenceClassificationExporter(Exporter):
                 filename_format = image_sequence.image.format
                 file_path = filename_format.replace('#', str(frame_no))
                 # Get image label
-                subsequence_label = keyframe.subsequencelabel
+                #subsequence_label = keyframe.subsequencelabel
                 # Write filepath/label_id pair to the file
-                file_list.write(';'.join((file_path, str(subsequence_label.label.id))) + '\n')
+                #file_list.write(';'.join((file_path, str(subsequence_label.label.id))) + '\n')
+                subsequence_labels = SubsequenceLabel.objects.filter(image=keyframe)
+                label_ids = [str(sl.label.id) for sl in subsequence_labels]
+                file_list.write(';'.join((file_path, ','.join(label_ids))) + '\n')
 
         file_list.close()
 
