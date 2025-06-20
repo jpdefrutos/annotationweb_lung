@@ -1,3 +1,4 @@
+from django.core.validators import validate_comma_separated_integer_list
 from django.db import models
 from django.contrib.auth.models import User
 
@@ -64,11 +65,14 @@ class Task(models.Model):
     name = models.CharField(max_length=200)
     dataset = models.ManyToManyField(Dataset)
     show_entire_sequence = models.BooleanField(help_text='Allow user to see entire sequence.', default=False)
-    frames_before = models.PositiveIntegerField(help_text='How many frames to allow user to see before a key frame', default=0)
-    frames_after = models.PositiveIntegerField(help_text='How many frames to allow user to see after a key frame', default=0)
+    frames_before = models.PositiveIntegerField(help_text='How many frames to allow user to see before a key frame',
+                                                default=0)
+    frames_after = models.PositiveIntegerField(help_text='How many frames to allow user to see after a key frame',
+                                               default=0)
     auto_play = models.BooleanField(help_text='Auto play image sequences', default=True)
     shuffle_videos = models.BooleanField(help_text='Shuffle videos for annotation task', default=True)
-    user_frame_selection = models.BooleanField(help_text='Annotaters can select which frames to annotate in a video', default=False)
+    user_frame_selection = models.BooleanField(help_text='Annotaters can select which frames to annotate in a video',
+                                               default=False)
     annotate_single_frame = models.BooleanField(help_text='Annotate a single frame at a time in videos', default=True)
     type = models.CharField(max_length=50, choices=TASK_TYPES)
     label = models.ManyToManyField(Label,
@@ -79,7 +83,8 @@ class Task(models.Model):
     user = models.ManyToManyField(User)
     description = models.TextField(default='', blank=True)
     large_image_layout = models.BooleanField(default=False, help_text='Use a large image layout for annotation')
-    post_processing_method = models.CharField(default='', help_text='Name of post processing method to use', max_length=255, blank=True)
+    post_processing_method = models.CharField(default='', help_text='Name of post processing method to use',
+                                              max_length=255, blank=True)
 
     def __str__(self):
         return self.name
@@ -103,7 +108,7 @@ class Task(models.Model):
         if self.total_number_of_images == 0:
             return 0
         else:
-            return round(self.number_of_annotated_images*100 / self.total_number_of_images, 1)
+            return round(self.number_of_annotated_images * 100 / self.total_number_of_images, 1)
 
 
 class ImageSequence(models.Model):

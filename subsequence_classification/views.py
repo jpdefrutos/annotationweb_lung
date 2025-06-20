@@ -1,5 +1,5 @@
 import json
-from django.views.decorators.csrf import csrf_exempt
+
 from django.contrib import messages
 from django.http import JsonResponse, HttpResponseRedirect
 from django.shortcuts import render, redirect
@@ -8,22 +8,12 @@ from django.db import transaction
 
 import common.task
 from .models import *
-from annotationweb.models import Task, ImageAnnotation, KeyFrameAnnotation, Label
+from annotationweb.models import Task, ImageAnnotation
 
-from .models import SubsequenceLabel
 
 def label_next_image(request, task_id):
     return label_subsequence(request, task_id, None)
 
-
-
-def get_frame_label_ids(request, frame_id):
-    try:
-        frame = KeyFrameAnnotation.objects.get(id=frame_id)
-        label_ids = list(SubsequenceLabel.objects.filter(image=frame).values_list('label_id', flat=True))
-        return JsonResponse({'label_ids': label_ids})
-    except KeyFrameAnnotation.DoesNotExist:
-        return JsonResponse({'error': 'Frame not found'}, status=404)
 
 def label_subsequence(request, task_id, image_id):
     """
@@ -54,11 +44,11 @@ def label_subsequence(request, task_id, image_id):
         messages.error(request, str(e))
         return HttpResponseRedirect(request.META.get('HTTP_REFERER'))
 
-"""
+
 def save_labels(request):
-    
-    #TODO: From classification/views.py. Adapt to this task
-    
+    """
+    TODO: From classification/views.py. Adapt to this task
+    """
     response = {}  # initialize response
     try:
         rejected = request.POST['rejected'] == 'true'
@@ -72,7 +62,7 @@ def save_labels(request):
             with transaction.atomic():
                 annotations = common.task.save_annotation(request)
                 frame_labels = json.loads(request.POST['frame_labels'])
-                
+
                 for annotation in annotations:
                     labeled_image = SubsequenceLabel()
                     labeled_image.image = annotation
@@ -93,78 +83,4 @@ def save_labels(request):
         }
 
     return JsonResponse(response)
-"""
-""" 
-def save_labels(request):
-    response = {}
-    try:
-        rejected = request.POST['rejected'] == 'true'
-        if rejected:
-            annotations = common.task.save_annotation(request)
-            response = {
-                'success': 'true',
-                'message': 'Completed'
-            }
-        else:
-            with transaction.atomic():
-                annotations = common.task.save_annotation(request)
-                frame_labels = json.loads(request.POST['frame_labels'])
-                for annotation in annotations:
-                    label_ids = frame_labels.get(str(annotation.frame_nr), [])
-                    if not isinstance(label_ids, list):
-                        label_ids = [label_ids]
-                    for label_id in label_ids:
-                        labeled_image = SubsequenceLabel()
-                        labeled_image.image = annotation
-                        labeled_image.label = Label.objects.get(id=label_id)
-                        labeled_image.task = annotation.image_annotation.task
-                        labeled_image.save()
-            response = {
-                'success': 'true',
-                'message': 'Completed'
-            }
-        messages.success(request, 'Subsequence classification saved')
-    except Exception as e:
-        response = {
-            'success': 'false',
-            'message': str(e)
-        }
-    return JsonResponse(response)
-"""
-def save_labels(request):
-    response = {}
-    try:
-        rejected = request.POST.get('rejected', 'false') == 'true'
-        if rejected:
-            annotations = common.task.save_annotation(request)
-            response = {
-                'success': 'true',
-                'message': 'Completed'
-            }
-        else:
-            with transaction.atomic():
-                annotations = common.task.save_annotation(request)
-                frame_labels = json.loads(request.POST['frame_labels'])
-                for annotation in annotations:
-                    # Remove previous labels for this frame
-                    SubsequenceLabel.objects.filter(image=annotation).delete()
-                    label_ids = frame_labels.get(str(annotation.frame_nr), [])
-                    if not isinstance(label_ids, list):
-                        label_ids = [label_ids]
-                    for label_id in label_ids:
-                        labeled_image = SubsequenceLabel()
-                        labeled_image.image = annotation
-                        labeled_image.label = Label.objects.get(id=label_id)
-                        labeled_image.task = annotation.image_annotation.task
-                        labeled_image.save()
-            response = {
-                'success': 'true',
-                'message': 'Completed'
-            }
-        messages.success(request, 'Subsequence classification saved')
-    except Exception as e:
-        response = {
-            'success': 'false',
-            'message': str(e)
-        }
-    return JsonResponse(response)
+
