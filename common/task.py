@@ -295,11 +295,9 @@ def save_annotation(request):
         rejected = request.POST['rejected'] == 'true'
         comments = request.POST['comments']
 
-        if task_id != Task.BLIND_CLASSIFICATION or task_id != Task.SUBSEQUENCE_CLASSIFICATION:
-            # TODO: Should handle this appropriately for subsequence classification - for now image quality is skipped
-            # Image quality is required
-            if 'quality' not in request.POST:
-                raise Exception('ERROR: You must select image quality.')
+        # Image quality is required
+        if Task.objects.get(id=task_id).image_quality and ('quality' not in request.POST):
+            raise Exception('ERROR: You must select image quality.')
 
         # Delete old key frames if they exist, this will also delete old annotations
         key_frames = KeyFrameAnnotation.objects.filter(image_annotation__task_id=task_id, image_annotation__image_id=image_id)
@@ -317,9 +315,7 @@ def save_annotation(request):
         annotation.comments = comments
         annotation.user = request.user
         annotation.finished = True
-        if annotation.task.type == Task.BLIND_CLASSIFICATION:
-            annotation.image_quality = 'unknown'
-        else:
+        if Task.objects.get(id=task_id).image_quality:
             annotation.image_quality = request.POST['quality']
         annotation.save()
 
