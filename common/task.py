@@ -297,7 +297,7 @@ def save_annotation(request):
         comments = request.POST['comments']
 
         # Image quality is required
-        if (Task.objects.get(task_id=task_id).image_quality) and ('quality' not in request.POST):
+        if Task.objects.get(id=task_id).image_quality and ('quality' not in request.POST):
             raise Exception('ERROR: You must select image quality.')
 
         # Delete old key frames if they exist, this will also delete old annotations
@@ -316,7 +316,7 @@ def save_annotation(request):
         annotation.comments = comments
         annotation.user = request.user
         annotation.finished = True
-        if Task.objects.get(task_id=task_id).image_quality:
+        if Task.objects.get(id=task_id).image_quality:
             annotation.image_quality = request.POST['quality']
         annotation.save()
 

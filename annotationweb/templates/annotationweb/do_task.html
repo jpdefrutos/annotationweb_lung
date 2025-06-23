@@ -77,14 +77,18 @@ setReturnURL('{{ return_url|safe }}');
     Do you wish to save the changes before going to the next/previous image?
 </div>
 <h3>Annotation</h3>
-<div id="imageQuality">
-<form id="imageQualityForm">
-    Image quality:
-    {% for quality_id, quality_name in image_quality_choices %}
-    <input type="radio" name="quality" value="{{ quality_id }}" required{% if chosen_quality == quality_id %} checked="checked"{% endif %}> {{ quality_name }}
-    {% endfor %}
-</form>
-</div>
+{% if task.image_quality %}
+    <div id="imageQuality">
+        <form id="imageQualityForm">
+            Image quality:
+            {% for quality_id, quality_name in image_quality_choices %}
+                {% if quality_id != 'unknown' %}
+                    <input type="radio" name="quality" value="{{ quality_id }}" required{% if chosen_quality == quality_id %} checked="checked"{% endif %}> {{ quality_name }}
+                {% endif %}
+            {% endfor %}
+        </form>
+    </div>
+{%  endif %}
 
 {%  block CopyContentButton %}
 {%  endblock CopyContentButton%}

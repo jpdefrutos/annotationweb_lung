@@ -134,6 +134,7 @@ class ImageAnnotation(models.Model):
         (QUALITY_POOR, 'Poor'),
         (QUALITY_OK, 'OK'),
         (QUALITY_GOOD, 'Good'),
+        (QUALITY_UNK, 'Unknown'),
     )
     image_quality = models.CharField(max_length=50, choices=IMAGE_QUALITY_CHOICES, default=QUALITY_UNK)
     comments = models.TextField()
