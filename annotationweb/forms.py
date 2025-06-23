@@ -11,7 +11,8 @@ class TaskForm(forms.ModelForm):
     class Meta:
         model = Task
         fields = ['name', 'dataset', 'show_entire_sequence', 'frames_before',
-                  'frames_after', 'auto_play', 'user_frame_selection', 'annotate_single_frame', 'shuffle_videos', 'type', 'label', 'user', 'description']
+                  'frames_after', 'auto_play', 'user_frame_selection', 'annotate_single_frame', 'shuffle_videos',
+                  'image_quality', 'type', 'label', 'user', 'description']
 
     # def clean(self):
     #     cleaned_data = super(TaskForm, self).clean()
@@ -103,3 +104,10 @@ class ImageListForm(forms.Form):
                 widget=forms.SelectMultiple(attrs={'onchange': 'this.form.submit();'})
             )
 
+        # if data['image_quality'] != ImageAnnotation.QUALITY_UNK:
+        #     self.fields['image_quality'] = forms.MultipleChoiceField(
+        #         label='Image quality',
+        #         choices=ImageAnnotation.IMAGE_QUALITY_CHOICES,
+        #         initial=[x for x, y in ImageAnnotation.IMAGE_QUALITY_CHOICES],
+        #         widget=forms.SelectMultiple(attrs={'onchange': 'this.form.submit();'})
+        #     )

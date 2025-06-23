@@ -47,8 +47,11 @@
         {% if task.annotate_single_frame %}
         Date: {{ image.annotation.date|date:"d-m-Y H:i" }}<br>
         User: {{ image.annotation.user.username }}<br>
-        Image quality: {{ image.annotation.image_quality }}<br>
-
+        
+        {% if task.image_quality %}
+            Image quality: {{ image.annotation.image_quality }}<br>
+        {% endif %}
+        
         {% if task.type == 'classification' %}
             {# Get all labels if task is classification task #}
             {% for frame in image.annotation_frames %}

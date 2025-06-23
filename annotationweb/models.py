@@ -73,6 +73,7 @@ class Task(models.Model):
            help_text='<button onclick="'
                      'window.open(\'/new-label/\', \'Add new label\', \'width=400,height=400,scrollbars=no\');"'
                      ' type="button">Add new label</button>')
+    image_quality = models.BooleanField(help_text='Request image quality evaluation', default=True)
     user = models.ManyToManyField(User)
     description = models.TextField(default='', blank=True)
     large_image_layout = models.BooleanField(default=False, help_text='Use a large image layout for annotation')
@@ -128,12 +129,14 @@ class ImageAnnotation(models.Model):
     QUALITY_POOR = 'poor'
     QUALITY_OK = 'ok'
     QUALITY_GOOD = 'good'
+    QUALITY_UNK = 'unknown'
     IMAGE_QUALITY_CHOICES = (
         (QUALITY_POOR, 'Poor'),
         (QUALITY_OK, 'OK'),
         (QUALITY_GOOD, 'Good'),
+        (QUALITY_UNK, 'Unknown'),
     )
-    image_quality = models.CharField(max_length=50, choices=IMAGE_QUALITY_CHOICES)
+    image_quality = models.CharField(max_length=50, choices=IMAGE_QUALITY_CHOICES, default=QUALITY_UNK)
     comments = models.TextField()
     rejected = models.BooleanField()
     finished = models.BooleanField(default=True)
