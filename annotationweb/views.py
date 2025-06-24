@@ -559,7 +559,7 @@ def task(request, task_id):
                 imageannotation__keyframeannotation__imagelabelblind__label__in=labels_selected,
                 # subject__in=subjects_selected,
             )
-        elif task.type == Task.SUBSEQUENCE_CLASSIFICATION: #TODO: now all annotated keyframes are shown within one image sequence, make sure only one is shown
+        elif task.type == Task.SUBSEQUENCE_CLASSIFICATION:
             labels_selected = search_filters.get_value('label')
             queryset = queryset.filter(
                 imageannotation__task=task,
