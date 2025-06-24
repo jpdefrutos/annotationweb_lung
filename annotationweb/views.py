@@ -567,7 +567,7 @@ def task(request, task_id):
                 imageannotation__user__in=users_selected,
                 imageannotation__keyframeannotation__subsequencelabel__label__in=labels_selected,
                 subject__in=subjects_selected,
-            )
+            ).distinct()
         else:
             queryset = queryset.filter(
                 imageannotation__image_quality__in=image_quality,
