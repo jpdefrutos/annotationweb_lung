@@ -85,7 +85,7 @@ function sendDataForSave() {
             task_id: g_taskID,
             frame_labels: JSON.stringify(g_labels),
             target_frames: JSON.stringify(g_targetFrames),
-            //quality: $('input[name=quality]:checked').val() || 'unknown', // Default to unknown if no quality is selected
+            quality: $('input[name=quality]:checked').val() || 'unknown', // Default to unknown if no quality is selected
             rejected: g_rejected ? 'true':'false',
             comments: $('#comments').val(),
         },
@@ -207,40 +207,7 @@ function endButtonClick(e) {
     updateFrameLabelVariables();
 }
 */
-/*
-function endButtonClick(e) {
-    if (!g_currentLabel) {
-        alert('You need to select a label before marking a subsequence!');
-        return;
-    }
 
-    if (jQuery.isEmptyObject(g_labels)) {
-        alert('You need to start a subsequence before ending it!');
-        return;
-    }
-
-    console.log('Subsequence for', g_currentLabel, 'ended on frame nr', g_currentFrameNr);
-
-    // Find start of subsequence with same label
-    let startOfSubsequence = findPreviousFrameWithSameLabel(g_currentFrameNr, g_currentLabel);
-    let lastFrame = g_startFrame + g_sequenceLength;
-    let frameIdx = startOfSubsequence;
-    while (frameIdx <= min(g_currentFrameNr, lastFrame)) {
-        // console.log('Add label', g_currentLabel, 'to frame', frameIdx);
-        addKeyFrame(frameIdx);
-        setLabel(frameIdx, g_currentLabel);
-        updateFrameLabelVariables();
-        frameIdx++;
-    }
-    // Add one mark for entire subsequence
-    sliderMarkSubsequence(startOfSubsequence, min(g_currentFrameNr, lastFrame), g_currentLabel);
-
-    // Label the current frame as the last in the subsequence
-    // frameIdx = g_currentFrameNr;
-    // addKeyFrame(frameIdx);
-    // setLabel(frameIdx, g_currentLabel);
-}
-*/
 function setupSubsequenceClassification() {
     console.log('Setting up subsequence classification....');
 
@@ -322,29 +289,27 @@ function setLabel(frame_nr, label_ids) {
     setupSliderMark(frame_nr, hexColor);
 }
 
-/*
-function setLabel(frame_nr, label_id) {
-    // Set label for frame
-    g_labels[frame_nr] = label_id;
-    //if (!g_labels[frame_nr]) {
-    //    g_labels[frame_nr] =[];
-    //}
-    //if (!g_labels[frame_nr].includes(label_id)) {
-    //    g_labels[frame_nr].push(label_id);
-    //}
 
-
-    // Update slider marker for frame
-    let label = getLabelWithId(label_id);
-    let hexColor =  colorToHexString(label.red, label.green, label.blue);
-    setupSliderMark(frame_nr, hexColor);
-}
-*/
-
-
+/* original addSubsequenceLabel function, kept for reference
 function addSubsequenceLabel(frame_nr, label_id) {
     addKeyFrame(frame_nr);
     setLabel(frame_nr, label_id);
+}
+*/
+
+function addSubsequenceLabel(frame_nr, label_id) {
+    addKeyFrame(frame_nr);
+    // Ensure g_labels[frame_nr] is an array
+    if (!g_labels[frame_nr]) {
+        g_labels[frame_nr] = [];
+    }
+    if (!g_labels[frame_nr].includes(label_id)) {
+        g_labels[frame_nr].push(label_id);
+    }
+    // Optionally update slider marker for the first label
+    let label = getLabelWithId(g_labels[frame_nr][0]);
+    let hexColor = colorToHexString(label.red, label.green, label.blue);
+    setupSliderMark(frame_nr, hexColor);
 }
 
 function updateFrameLabelVariables() {
@@ -512,13 +477,16 @@ function loadSequence(
         if(g_targetFrames.includes(g_currentFrameNr)) {
             g_targetFrames.splice(g_targetFrames.indexOf(g_currentFrameNr), 1);
             g_currentTargetFrameIndex = -1;
-            $('#sliderMarker' + g_currentFrameNr).remove();
+            $('#sliderMarker' + g_currentFrameNr).css('background-color', '#888888'); //change color to gray
+            //$('#sliderMarker' + g_currentFrameNr).remove();
             $('#selectedFrames' + g_currentFrameNr).remove();
             $('#selectedFramesForm' + g_currentFrameNr).remove();
             g_labels = dictDelete(g_labels, g_currentFrameNr);
             updateFrameLabelVariables();
         }
     });
+
+
 
     $("#nextFrameButton").click(function() {
         goToNextKeyFrame();

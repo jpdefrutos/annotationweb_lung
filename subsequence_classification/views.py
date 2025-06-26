@@ -94,43 +94,8 @@ def save_labels(request):
 
     return JsonResponse(response)
 """
-""" 
-def save_labels(request):
-    response = {}
-    try:
-        rejected = request.POST['rejected'] == 'true'
-        if rejected:
-            annotations = common.task.save_annotation(request)
-            response = {
-                'success': 'true',
-                'message': 'Completed'
-            }
-        else:
-            with transaction.atomic():
-                annotations = common.task.save_annotation(request)
-                frame_labels = json.loads(request.POST['frame_labels'])
-                for annotation in annotations:
-                    label_ids = frame_labels.get(str(annotation.frame_nr), [])
-                    if not isinstance(label_ids, list):
-                        label_ids = [label_ids]
-                    for label_id in label_ids:
-                        labeled_image = SubsequenceLabel()
-                        labeled_image.image = annotation
-                        labeled_image.label = Label.objects.get(id=label_id)
-                        labeled_image.task = annotation.image_annotation.task
-                        labeled_image.save()
-            response = {
-                'success': 'true',
-                'message': 'Completed'
-            }
-        messages.success(request, 'Subsequence classification saved')
-    except Exception as e:
-        response = {
-            'success': 'false',
-            'message': str(e)
-        }
-    return JsonResponse(response)
-"""
+
+
 def save_labels(request):
     response = {}
     try:
@@ -149,6 +114,7 @@ def save_labels(request):
                     # Remove previous labels for this frame
                     SubsequenceLabel.objects.filter(image=annotation).delete()
                     label_ids = frame_labels.get(str(annotation.frame_nr), [])
+                    quality = models.CharField(max_length=50, default='unknown')
                     if not isinstance(label_ids, list):
                         label_ids = [label_ids]
                     for label_id in label_ids:
