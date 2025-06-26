@@ -1,6 +1,7 @@
 {% extends 'annotationweb/one_column_layout.html' %}
 
 {% block content %}
+{% load get_sequence_name %}
 
 <h1>{{ task.name }}</h1>
 
@@ -38,7 +39,10 @@
 
     <div style="float: left; width: 25%; box-sizing: border-box; padding: 10px;">
         <img src="{% url 'show_image' image.id task.id %}" width="100%">
-        {{ image.format }}<br>
+        {% if task.type != 'blind_classification' %} <!-- do not show image format when the task is blind classification -->
+            {{ image.format|get_patient_sequence_and_filename }}
+        {% endif %}
+        <br>
 
         {% if image.annotation.finished %}
         {% if image.annotation.rejected %}
@@ -47,12 +51,20 @@
         {% if task.annotate_single_frame %}
         Date: {{ image.annotation.date|date:"d-m-Y H:i" }}<br>
         User: {{ image.annotation.user.username }}<br>
-        Image quality: {{ image.annotation.image_quality }}<br>
+
+        {% if task.image_quality %}
+            Image quality: {{ image.annotation.image_quality }}<br>
+        {% endif %}
 
         {% if task.type == 'classification' %}
             {# Get all labels if task is classification task #}
             {% for frame in image.annotation_frames %}
                 {% complete_label frame.imagelabel.label %}<br>
+            {% endfor %}
+        {% elif task.type == 'blind_classification' %}
+            {# Use loop even though this probably only has one frame #}
+            {% for frame in image.annotation_frames %}
+                {% complete_label frame.imagelabelblind.label %}<br>
             {% endfor %}
         {% elif task.type == 'boundingbox' %}
             Boxes added {{ image.annotation.boundingbox_set.count }}<br>
@@ -72,7 +84,7 @@
         <a href="{% url 'annotate' task.id image.id %}">Annotate</a><br>
         {% endif %}
         {{ image.annotation_frames | length }} key frames.<br>
-        {% if user.is_staff %}
+        {% if user.is_staff and task.type != 'blind_classification' %}
         <a href="{% url 'select_key_frames' task.id image.id %}">Select key frames</a>
         {% endif %}
 

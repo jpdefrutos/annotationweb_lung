@@ -54,7 +54,7 @@ function incrementFrame() {
     $('#slider').slider('value', g_currentFrameNr); // Update slider
     $('#currentFrame').text(g_currentFrameNr);
     redrawSequence();
-    window.setTimeout(incrementFrame, 50);
+    window.setTimeout(incrementFrame, 100);
 }
 
 function setPlayButton(play) {
@@ -234,7 +234,7 @@ function goToPreviousKeyFrame() {
 }
 function loadSequence(image_sequence_id, start_frame, nrOfFrames, show_entire_sequence, user_frame_selection, annotate_single_frame, frames_to_annotate, images_to_load_before, images_to_load_after, auto_play) {
     // If user cannot select frame, and there are no target frames, select last frame as target frame
-    if(!user_frame_selection && annotate_single_frame && frames_to_annotate.length === 0) {
+    if(user_frame_selection && annotate_single_frame && frames_to_annotate.length === 0) {
         // Select last frame as target frame
         frames_to_annotate.push(nrOfFrames-1);
     }
@@ -280,6 +280,8 @@ function loadSequence(image_sequence_id, start_frame, nrOfFrames, show_entire_se
     }
     g_startFrame = start;
     g_sequenceLength = end-start;
+    console.log(g_startFrame);
+    console.log(g_sequenceLength);
     console.log("Start frame = " + toString(g_startFrame) + ", sequence length = " + toString(g_sequenceLength));
 
     // Create slider
@@ -355,18 +357,14 @@ function loadSequence(image_sequence_id, start_frame, nrOfFrames, show_entire_se
             if(g_shiftKeyPressed) {
                 goToNextKeyFrame();
             } else {
-                if (g_currentFrameNr < end) {
-                    goToFrame(g_currentFrameNr + 1);
-                }
+                goToFrame(g_currentFrameNr + 1);
             }
         } else {
             // scroll down
             if(g_shiftKeyPressed) {
                 goToPreviousKeyFrame();
             } else {
-                if (g_currentFrameNr > start) {
-                    goToFrame(g_currentFrameNr - 1);
-                }
+                goToFrame(g_currentFrameNr - 1);
             }
         }
         event.preventDefault();
@@ -379,17 +377,13 @@ function loadSequence(image_sequence_id, start_frame, nrOfFrames, show_entire_se
             if(g_shiftKeyPressed) {
                 goToPreviousKeyFrame();
             } else {
-                if (g_currentFrameNr > start) {
-                    goToFrame(g_currentFrameNr - 1);
-                }
+                goToFrame(g_currentFrameNr - 1);
             }
         } else if(event.which === 39) { // Right
             if(g_shiftKeyPressed) {
                 goToNextKeyFrame();
             } else {
-                if (g_currentFrameNr < end) {
-                    goToFrame(g_currentFrameNr + 1);
-                }
+                goToFrame(g_currentFrameNr + 1);
             }
         }
     });

@@ -1,3 +1,4 @@
+from django.core.validators import validate_comma_separated_integer_list
 from django.db import models
 from django.contrib.auth.models import User
 
@@ -39,44 +40,51 @@ class Label(models.Model):
 
 class Task(models.Model):
     CLASSIFICATION = 'classification'
+    BLIND_CLASSIFICATION = 'blind_classification'
     BOUNDING_BOX = 'boundingbox'
     LANDMARK = 'landmark'
     CARDIAC_SEGMENTATION = 'cardiac_segmentation'
     CARDIAC_PLAX_SEGMENTATION = 'cardiac_plax_segmentation'
     CARDIAC_ALAX_SEGMENTATION = 'cardiac_alax_segmentation'
-    IMAGE_QUALITY = 'image_quality'
     SPLINE_SEGMENTATION = 'spline_segmentation'
-    SPLINE_LINE_POINT = 'spline_line_point'
+    VIDEO_ANNOTATION = 'video_annotation'
+    SUBSEQUENCE_CLASSIFICATION = 'subsequence_classification'
     TASK_TYPES = (
         (CLASSIFICATION, 'Classification'),
+        (BLIND_CLASSIFICATION, 'Blind classification'),
         (BOUNDING_BOX, 'Bounding box'),
         (LANDMARK, 'Landmark'),
-        (CARDIAC_SEGMENTATION, 'Cardiac apical segmentation'),
+        (CARDIAC_SEGMENTATION, 'Cardiac segmentation'),
         (CARDIAC_PLAX_SEGMENTATION, 'Cardiac PLAX segmentation'),
         (CARDIAC_ALAX_SEGMENTATION, 'Cardiac ALAX segmentation'),
         (SPLINE_SEGMENTATION, 'Spline segmentation'),
-        (SPLINE_LINE_POINT, 'Splines, lines & point segmentation'),
-        (IMAGE_QUALITY, 'Image Quality'),
+        (VIDEO_ANNOTATION, 'Video annotation'),
+        (SUBSEQUENCE_CLASSIFICATION, 'Subsequence classification')
     )
 
     name = models.CharField(max_length=200)
     dataset = models.ManyToManyField(Dataset)
     show_entire_sequence = models.BooleanField(help_text='Allow user to see entire sequence.', default=False)
-    frames_before = models.PositiveIntegerField(help_text='How many frames to allow user to see before a key frame', default=0)
-    frames_after = models.PositiveIntegerField(help_text='How many frames to allow user to see after a key frame', default=0)
+    frames_before = models.PositiveIntegerField(help_text='How many frames to allow user to see before a key frame',
+                                                default=0)
+    frames_after = models.PositiveIntegerField(help_text='How many frames to allow user to see after a key frame',
+                                               default=0)
     auto_play = models.BooleanField(help_text='Auto play image sequences', default=True)
     shuffle_videos = models.BooleanField(help_text='Shuffle videos for annotation task', default=True)
-    user_frame_selection = models.BooleanField(help_text='Annotaters can select which frames to annotate in a video', default=False)
+    user_frame_selection = models.BooleanField(help_text='Annotaters can select which frames to annotate in a video',
+                                               default=False)
     annotate_single_frame = models.BooleanField(help_text='Annotate a single frame at a time in videos', default=True)
     type = models.CharField(max_length=50, choices=TASK_TYPES)
     label = models.ManyToManyField(Label,
            help_text='<button onclick="'
                      'window.open(\'/new-label/\', \'Add new label\', \'width=400,height=400,scrollbars=no\');"'
                      ' type="button">Add new label</button>')
+    image_quality = models.BooleanField(help_text='Request image quality evaluation', default=True)
     user = models.ManyToManyField(User)
     description = models.TextField(default='', blank=True)
     large_image_layout = models.BooleanField(default=False, help_text='Use a large image layout for annotation')
-    post_processing_method = models.CharField(default='', help_text='Name of post processing method to use', max_length=255, blank=True)
+    post_processing_method = models.CharField(default='', help_text='Name of post processing method to use',
+                                              max_length=255, blank=True)
 
     def __str__(self):
         return self.name
@@ -100,8 +108,7 @@ class Task(models.Model):
         if self.total_number_of_images == 0:
             return 0
         else:
-            return round(self.number_of_annotated_images*100 / self.total_number_of_images, 1)
-
+            return round(self.number_of_annotated_images * 100 / self.total_number_of_images, 1)
 
 
 class ImageSequence(models.Model):
@@ -128,12 +135,14 @@ class ImageAnnotation(models.Model):
     QUALITY_POOR = 'poor'
     QUALITY_OK = 'ok'
     QUALITY_GOOD = 'good'
+    QUALITY_UNK = 'unknown'
     IMAGE_QUALITY_CHOICES = (
         (QUALITY_POOR, 'Poor'),
         (QUALITY_OK, 'OK'),
         (QUALITY_GOOD, 'Good'),
+        (QUALITY_UNK, 'Unknown'),
     )
-    image_quality = models.CharField(max_length=50, choices=IMAGE_QUALITY_CHOICES)
+    image_quality = models.CharField(max_length=50, choices=IMAGE_QUALITY_CHOICES, default=QUALITY_UNK)
     comments = models.TextField()
     rejected = models.BooleanField()
     finished = models.BooleanField(default=True)
