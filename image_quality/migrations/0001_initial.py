@@ -9,7 +9,7 @@ class Migration(migrations.Migration):
     initial = True
 
     dependencies = [
-        ('annotationweb', '0007_auto_20230202_1054'),
+        ('annotationweb', '0007_auto_20240117_1419'),
     ]
 
     operations = [
