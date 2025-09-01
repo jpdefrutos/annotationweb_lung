@@ -229,6 +229,18 @@ function updateFrameLabelVariables() {
         $('#currentFrameLabel').text('No label');
         $('#currentFrameLabelDisplay').text('No label');
     }
+
+    // --- Update predicted class ---
+    const predictedClassElem = document.getElementById('predicted-class');
+    const predictedClassHeader = predictedClassElem.parentElement; // the <h3> that contains the span
+
+    if (window.framePredictions && window.framePredictions[g_currentFrameNr] !== undefined) {
+        predictedClassElem.textContent = window.framePredictions[g_currentFrameNr];
+        predictedClassHeader.style.display = 'block'; // show <h3> if prediction exists
+    } else {
+        predictedClassElem.textContent = '';
+        predictedClassHeader.style.display = 'none'; // hide <h3> if no prediction
+    }
 }
 
 function dictDelete(dict, key) {
@@ -521,7 +533,7 @@ function incrementFrame() {
 
     updateFrameLabelVariables();
     redrawSequence();
-    window.setTimeout(incrementFrame, 25);
+    window.setTimeout(incrementFrame, 200);
 }
 
 function goToFrame(frameNr) {

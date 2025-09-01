@@ -3,8 +3,8 @@
 {# This template is adapted from the two_column_layout.html template #}
 
 {% block javascript %}
-
     initializeAnnotation({{ task.id }}, {{ image.id }});
+    window.framePredictions = {{ frame_predictions_json|safe }};
 
     {% if image_sequence %}
         loadSequence(
@@ -58,6 +58,7 @@
     {% if image_sequence %}
     {% load get_sequence_name %}
     <h3>Sequence: {{ image_sequence.format|get_sequence_name }}</h3>
+    <h3>Predicted class: <span id="predicted-class"></span></h3>
     <div id="progressbar"><div class="progress-label">Loading...</div></div>
     <div id="sliderText">
         Drag the slider to view the other frames in the sequence. Current frame <span id="currentFrame"></span>
