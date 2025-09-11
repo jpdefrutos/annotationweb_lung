@@ -9,6 +9,8 @@ from django.db import transaction
 import common.task
 from .models import *
 from annotationweb.models import Task, ImageAnnotation
+from subsequence_classification.models import FramePrediction
+
 
 
 def label_next_image(request, task_id):
@@ -25,6 +27,14 @@ def label_subsequence(request, task_id, image_id):
 
         # Load labels
         #context['labels'] = Label.objects.filter(task=task_id)
+
+        # Get the sequence
+        sequence = context.get("image_sequence")
+
+        if sequence:
+            frame_predictions = FramePrediction.objects.filter(sequence=sequence).order_by("frame_nr")
+            context["frame_predictions"] = {fp.frame_nr: fp.predicted_class_info for fp in frame_predictions}
+            context["frame_predictions_json"] = json.dumps(context["frame_predictions"])
 
         # Get label, if image has been already labeled
         try:

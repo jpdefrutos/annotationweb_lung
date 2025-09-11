@@ -89,6 +89,17 @@ def export_options(request, task_id, exporter_index):
 
     return render(request, 'annotationweb/export_options.html', {'form': form, 'exporter_index': exporter_index, 'task': task})
 
+def get_available_importers(dataset):
+    """
+    Returns a list of available importer instances for the given dataset.
+    """
+    available_importers = []
+    for importer_cls in find_all_importers():
+        importer = importer_cls()
+        importer.dataset = dataset
+        if importer.is_available():
+            available_importers.append(importer)
+    return available_importers
 
 @staff_member_required
 def import_data(request, dataset_id):
@@ -97,11 +108,12 @@ def import_data(request, dataset_id):
     except Dataset.DoesNotExist:
         raise Http404('Dataset does not exist')
 
+    available_importers = get_available_importers(dataset)
+
     if request.method == 'POST':
         importer_index = int(request.POST['importer'])
         return redirect('import_options', dataset_id=dataset.id, importer_index=importer_index)
     else:
-        available_importers = find_all_importers()
         return render(request, 'annotationweb/choose_importer.html', {'importers': available_importers, 'dataset': dataset})
 
 
@@ -112,8 +124,8 @@ def import_options(request, dataset_id, importer_index):
     except Dataset.DoesNotExist:
         raise Http404('Dataset does not exist')
 
-    available_importers = find_all_importers()
-    importer = available_importers[int(importer_index)]()
+    available_importers = get_available_importers(dataset)
+    importer = available_importers[int(importer_index)]
     importer.dataset = dataset
 
     if request.method == 'POST':
