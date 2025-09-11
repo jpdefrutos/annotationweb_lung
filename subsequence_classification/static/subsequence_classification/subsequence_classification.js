@@ -231,7 +231,7 @@ function updateFrameLabelVariables() {
     }
 
     // --- Update predicted class ---
-    const predictedClassElem = document.getElementById('predicted-class');
+    const predictedClassElem = document.getElementById('predicted-class-info');
     const predictedClassHeader = predictedClassElem.parentElement; // the <h3> that contains the span
 
     if (window.framePredictions && window.framePredictions[g_currentFrameNr] !== undefined) {

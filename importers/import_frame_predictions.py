@@ -17,15 +17,27 @@ class FramePredictionImporterForm(forms.Form):
 
 
 class FramePredictionImporter(Importer):
-    name = "Frame Prediction CSV Importer"
+    name = "Frame prediction CSV importer"
     dataset = None  # must be set externally before running
+    def has_sequences(self):
+        if self.dataset is None:
+            return False
+        return ImageSequence.objects.filter(subject__dataset=self.dataset).exists()
+
+    def is_available(self):
+        return self.has_sequences()
 
     def get_form(self, data=None):
+        if not self.has_sequences():
+            return None
         return FramePredictionImporterForm(data)
 
     def import_data(self, form: forms.Form):
         if self.dataset is None:
             raise Exception("Dataset must be given to the importer")
+
+        if not self.has_sequences():
+            raise Exception("No ImageSequences found in this dataset. Cannot import.")
 
         csv_file = form.cleaned_data['csv_file']
 
@@ -33,7 +45,7 @@ class FramePredictionImporter(Importer):
             reader = csv.DictReader(f)
             for row in reader:
                 filepath = row['filepath']
-                predicted_class = row['predicted_class']
+                predicted_class_info = row['predicted_class']
 
                 # Extract frame index from filename
                 filename = os.path.basename(filepath)  # e.g. frame_0.png
@@ -53,7 +65,7 @@ class FramePredictionImporter(Importer):
                 ).first()
 
                 if not seq:
-                    print(f"No ImageSequence found for format {sequence_format}")
+                    print(f"No ImageSequence found for format {sequence_format}") # Log and skip
                     continue
 
                 # Insert or update FramePrediction
@@ -62,7 +74,7 @@ class FramePredictionImporter(Importer):
                     frame_nr=frame_nr,
                     defaults={
                         "filepath": filepath,
-                        "predicted_class": predicted_class
+                        "predicted_class_info": predicted_class_info
                     },
                 )
 

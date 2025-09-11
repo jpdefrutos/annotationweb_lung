@@ -33,7 +33,7 @@ def label_subsequence(request, task_id, image_id):
 
         if sequence:
             frame_predictions = FramePrediction.objects.filter(sequence=sequence).order_by("frame_nr")
-            context["frame_predictions"] = {fp.frame_nr: fp.predicted_class for fp in frame_predictions}
+            context["frame_predictions"] = {fp.frame_nr: fp.predicted_class_info for fp in frame_predictions}
             context["frame_predictions_json"] = json.dumps(context["frame_predictions"])
 
         # Get label, if image has been already labeled
