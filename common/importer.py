@@ -25,6 +25,10 @@ class Importer(metaclass=MetaImporter):
     def import_data(self, form):
         raise NotImplementedError('An importer needs to implement an import_data method')
 
+    def is_available(self):
+        """By default, all importers are available."""
+        return True
+
 
 def find_all_importers():
     result = []
