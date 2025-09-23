@@ -11,7 +11,7 @@ class SubsequenceLabel(models.Model):
     label : models.ForeignKey --> Label
         The label of the subsequence/video segment
     """
-    image = models.OneToOneField(KeyFrameAnnotation, on_delete=models.CASCADE)
+    image = models.ForeignKey(KeyFrameAnnotation, on_delete=models.CASCADE)
     label = models.ForeignKey(Label, on_delete=models.CASCADE)
 
 
