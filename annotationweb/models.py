@@ -46,7 +46,9 @@ class Task(models.Model):
     CARDIAC_SEGMENTATION = 'cardiac_segmentation'
     CARDIAC_PLAX_SEGMENTATION = 'cardiac_plax_segmentation'
     CARDIAC_ALAX_SEGMENTATION = 'cardiac_alax_segmentation'
+    IMAGE_QUALITY = 'image_quality'
     SPLINE_SEGMENTATION = 'spline_segmentation'
+    SPLINE_LINE_POINT = 'spline_line_point'
     VIDEO_ANNOTATION = 'video_annotation'
     SUBSEQUENCE_CLASSIFICATION = 'subsequence_classification'
     TASK_TYPES = (
@@ -58,6 +60,8 @@ class Task(models.Model):
         (CARDIAC_PLAX_SEGMENTATION, 'Cardiac PLAX segmentation'),
         (CARDIAC_ALAX_SEGMENTATION, 'Cardiac ALAX segmentation'),
         (SPLINE_SEGMENTATION, 'Spline segmentation'),
+        (SPLINE_LINE_POINT, 'Splines, lines & point segmentation'),
+        (IMAGE_QUALITY, 'Image Quality'),
         (VIDEO_ANNOTATION, 'Video annotation'),
         (SUBSEQUENCE_CLASSIFICATION, 'Subsequence classification')
     )
