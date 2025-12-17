@@ -29,6 +29,11 @@
         addLabelButton({{ label.id }}, "{{ label.name }}", {{ label.color_red }}, {{ label.color_green }}, {{ label.color_blue }}, {% if label.parent %}{{ label.parent.id }}{% else  %}0{% endif %});
     {% endfor %}
 
+    {# Add custom label button(?)#}
+    {% for label in subsequence_labels %}
+        addLabelButton({{ label.label.id }}, "{{ label.label.name }}", {{ label.label.color_red }}, {{ label.label.color_green }}, {{ label.label.color_blue }}, {% if label.label.parent %}{{ label.label.parent.id }}{% else %}0{% endif %});
+        addSubsequenceLabel({{ label.image.frame_nr }}, {{ label.label.id }});
+    {% endfor %}
 
     {# Add previously stored subsequence labels if they exist #}
     {% for label in subsequence_labels %}
@@ -160,6 +165,12 @@
         {% endblock label_buttons %}
     </div>
 
+
+    {% elif toplabels|length == 1 and toplabels.0.name|lower == 'textbox' %}
+    <div>
+        <label for="customLabelInput">Enter label:</label>
+        <input type="text" id="customLabelInput" placeholder="Type label here">
+    </div>
 
     <h3>Mark subsequence </h3>
 

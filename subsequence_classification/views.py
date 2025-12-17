@@ -30,18 +30,24 @@ def label_subsequence(request, task_id, image_id):
     """
     TODO: From classification/views.py. Adapted to render page, needs further work
     """
+    print("label_subsequence view called")
     try:
         context = common.task.setup_task_context(request, task_id, Task.SUBSEQUENCE_CLASSIFICATION, image_id)
         context['javascript_files'] = ['subsequence_classification/subsequence_classification.js']
 
         # Load labels
-        #context['labels'] = Label.objects.filter(task=task_id)
-
+        context['labels'] = Label.objects.filter(task=task_id)
+        context['toplabels'] = Label.objects.filter(task=task_id, parent=None)
         # Get the sequence
         sequence = context.get("image_sequence")
 
         if sequence:
+            print("Loading frame predictions for sequence:", sequence)
             frame_predictions = FramePrediction.objects.filter(sequence=sequence).order_by("frame_nr")
+            print("Loaded", frame_predictions.count(), "frame predictions")
+            # Print predicted class info for each frame
+            for fp in frame_predictions:
+                print(f"Frame {fp.frame_nr}: Predicted class = {fp.predicted_class_info}")
             context["frame_predictions"] = {fp.frame_nr: fp.predicted_class_info for fp in frame_predictions}
             context["frame_predictions_json"] = json.dumps(context["frame_predictions"])
 
@@ -106,10 +112,13 @@ def save_labels(request):
 
 
 def save_labels(request):
+    print("save_labels called")  # Step 1
+    print("POST data:", request.POST)  # Step 2
     response = {}
     try:
         rejected = request.POST.get('rejected', 'false') == 'true'
         if rejected:
+            print("Annotation rejected")
             annotations = common.task.save_annotation(request)
             response = {
                 'success': 'true',
@@ -118,20 +127,64 @@ def save_labels(request):
         else:
             with transaction.atomic():
                 annotations = common.task.save_annotation(request)
+                print("Annotations:", annotations)
                 frame_labels = json.loads(request.POST['frame_labels'])
+                print("Annotations:", annotations)
+                custom_frame_labels = json.loads(request.POST.get('custom_frame_labels', '{}')) # Load custom frame labels if provided (from text boxes)
+                print("Custom frame labels:", custom_frame_labels)
+                # Save standard and custom labels for annotated frames
                 for annotation in annotations:
-                    # Remove previous labels for this frame
                     SubsequenceLabel.objects.filter(image=annotation).delete()
                     label_ids = frame_labels.get(str(annotation.frame_nr), [])
-                    quality = models.CharField(max_length=50, default='unknown')
                     if not isinstance(label_ids, list):
                         label_ids = [label_ids]
                     for label_id in label_ids:
-                        labeled_image = SubsequenceLabel()
-                        labeled_image.image = annotation
-                        labeled_image.label = Label.objects.get(id=label_id)
-                        labeled_image.task = annotation.image_annotation.task
+                        print("Saving label_id:", label_id)
+                        labeled_image = SubsequenceLabel(
+                            image=annotation,
+                            label=Label.objects.get(id=label_id)
+                        )
+                        #
                         labeled_image.save()
+
+                    # Save custom label if present
+                    custom_label = custom_frame_labels.get(str(annotation.frame_nr))
+                    if custom_label:
+                        label, created = Label.objects.get_or_create(
+                            name=custom_label,
+                            #task=annotation.image_annotation.task,
+                            defaults={'color_red': 128, 'color_green': 128, 'color_blue': 128}
+                        )
+                        sublabel = SubsequenceLabel.objects.create(
+                            image=annotation,
+                            label=label,
+                            #task=annotation.image_annotation.task
+                        )
+                        print(f"Created SubsequenceLabel for custom label id={sublabel.id}")
+                # Save custom labels for frames not in annotations
+                task_id = int(request.POST['task_id'])
+                image_id = int(request.POST['image_id'])
+                for frame_str, custom_label in custom_frame_labels.items():
+                    frame_nr = int(frame_str)
+                    if not any(a.frame_nr == frame_nr for a in annotations):
+                        image_annotation = ImageAnnotation.objects.filter(task=task_id, image_id=image_id).first()
+                        if not image_annotation:
+                            raise Exception("No ImageAnnotation found for this task")
+                        annotation, _ = KeyFrameAnnotation.objects.get_or_create(
+                            image_annotation=image_annotation,
+                            frame_nr=frame_nr
+                        )
+                        label, created = Label.objects.get_or_create(
+                            name=custom_label,
+                            #task=annotation.image_annotation.task,
+                            defaults={'color_red': 0, 'color_green': 255, 'color_blue': 0}
+                        )
+                        sublabel = SubsequenceLabel.objects.create(
+                            image=annotation,
+                            label=label,
+                            #task=annotation.image_annotation.task
+                        )
+                        print(f"Created SubsequenceLabel for custom label id={sublabel.id}")
             response = {
                 'success': 'true',
                 'message': 'Completed'
