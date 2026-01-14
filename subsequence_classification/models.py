@@ -4,6 +4,7 @@ from annotationweb.models import KeyFrameAnnotation, Label, ImageSequence
 
 class SubsequenceLabel(models.Model):
     """
+
     Attributes
     ----------
     image : models.OneToOneField --> KeyFrameAnnotation
@@ -11,6 +12,7 @@ class SubsequenceLabel(models.Model):
     label : models.ForeignKey --> Label
         The label of the subsequence/video segment
     """
+    #image = models.OneToOneField(KeyFrameAnnotation, on_delete=models.CASCADE)
     image = models.ForeignKey(KeyFrameAnnotation, on_delete=models.CASCADE)
     label = models.ForeignKey(Label, on_delete=models.CASCADE)
 

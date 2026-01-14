@@ -14,10 +14,10 @@ let g_subsequenceCustomLabel = null;
 
 
 function isTextboxOnlyMode() {
-    // Toplabels == 1 and that single label is "textbox"
-    return g_labelButtons.length === 1 &&
-           typeof g_labelButtons[0].name === 'string' &&
-           g_labelButtons[0].name.toLowerCase() === 'textbox';
+    // Activate textbox mode if any label is named "textbox"
+    return g_labelButtons.some(
+        l => typeof l.name === 'string' && l.name.toLowerCase() === 'textbox'
+    );
 }
 
 function isSingleNonTextboxMode() {
@@ -102,7 +102,7 @@ function startButtonClick(e) {
     if (isTextboxOnlyMode()) {
         const inputEl = document.getElementById('customLabelInput');
         if (!inputEl) {
-            alert('Textbox element not found. Please check the template for the textbox\-only configuration.');
+            alert('Textbox element not found. Please check the template for the textbox only configuration.');
             return;
         }
         const label = inputEl.value.trim();
@@ -119,7 +119,9 @@ function startButtonClick(e) {
     }
 
     // 2) Multi\-label mode: two or more labels
-    if (g_labelButtons.length > 1) {
+    if (g_labelButtons.length > 1 &&
+    !g_labelButtons.some(l => typeof l.name === 'string' && l.name.toLowerCase() === 'textbox')
+    ) {
         if (!Array.isArray(g_selectedLabels) || g_selectedLabels.length === 0) {
             alert('You need to select at least one label before marking a subsequence!');
             return;
@@ -135,7 +137,7 @@ function startButtonClick(e) {
             .join(', ');
 
         updateCurrentFrameLabelDisplay(labelNames);
-        console.log('Start subsequence (multi\-label) at frame', g_currentFrameNr, 'Labels:', g_subsequenceLabels);
+        console.log('Start subsequence (multi label) at frame', g_currentFrameNr, 'Labels:', g_subsequenceLabels);
         return;
     }
 
@@ -153,93 +155,7 @@ function startButtonClick(e) {
     alert('Configuration error: no valid subsequence mode detected.');
 }
 
-/*
-function startButtonClick(e) {
 
-    // Get label from textbox
-    const label = document.getElementById('customLabelInput').value.trim();
-    if (!label) {
-        alert('Please enter a label before marking a subsequence!');
-        return;
-    }
-    g_subsequenceStartFrame = g_currentFrameNr;
-    //const currentFrame = g_currentFrameNr;
-    g_subsequenceCustomLabel = label; // Store custom label globally
-    //g_customFrameLabels[g_currentFrameNr] = label;
-    updateCurrentFrameLabelDisplay(label);
-    console.log('Setting label for frame:', g_currentFrameNr, 'Label:', g_subsequenceCustomLabel);
-}
-
-function startButtonClick(e) {
-
-    // Get label from textbox
-    const label = document.getElementById('customLabelInput').value.trim();
-    if (!label) {
-        alert('Please enter a label before marking a subsequence!');
-        return;
-    }
-    g_subsequenceStartFrame = g_currentFrameNr;
-    //const currentFrame = g_currentFrameNr;
-    g_subsequenceCustomLabel = label; // Store custom label globally
-    //g_customFrameLabels[g_currentFrameNr] = label;
-    updateCurrentFrameLabelDisplay(label);
-
-
-    // Example function to update label display (implement as needed)
-    //function updateLabelDisplay(frame, label) {
-    //    document.getElementById('frameLabelDisplay').textContent = label;
-    //}
-    /*
-     if (!Array.isArray(g_selectedLabels) || g_selectedLabels.length === 0) {
-        alert('You need to select at least one label before marking a subsequence!');
-        return;
-    }
-    */
-    // If no labels are selected, alert user
-    //console.log('Subsequence started on frame', g_currentFrameNr, 'with labels:', g_selectedLabels);
-    //g_subsequenceLabels = [...g_selectedLabels]; // Store a copy
-    //g_subsequenceStartFrame = g_currentFrameNr;
-
-    /*
-    if (g_currentLabel === -1) {
-        if (g_labelButtons.length === 1) {
-            changeLabel(g_labelButtons[0].id)
-            console.log('only one label button')
-        }
-        else {
-            alert('You need to select a label before marking a subsequence!');
-            return;
-        }
-    }
-    */
-    //console.log('Subsequence for', getLabelWithId(g_currentLabel).name, 'started on frame nr', g_currentFrameNr);
-/*
-    // Label current frame as first in sequence
-    $('#currentFrame').text(g_currentFrameNr);
-    addKeyFrame(g_currentFrameNr);
-
-    //setLabel(g_currentFrameNr, g_currentLabel);
-    setLabel(g_currentFrameNr, g_subsequenceLabels);
-
-    // Find next frame belonging to a different sequence (if any)
-    let nextFrameWithDifferentLabel = findNextFrameWithDifferentLabel(g_currentFrameNr);
-    if (nextFrameWithDifferentLabel === -1) {
-        console.log('No frame found with different label');
-    }
-    let lastFrame = g_startFrame + g_sequenceLength;
-    let frameIdx = g_currentFrameNr;
-    while (frameIdx  < min(nextFrameWithDifferentLabel, lastFrame)) {
-        frameIdx++;
-           //addKeyFrame(frameIdx);
-        setLabel(frameIdx, g_currentLabel);
-         // Example: update custom label or UI
-        g_customFrameLabels[frameIdx] = g_subsequenceCustomLabel;
-        updateCurrentFrameLabelDisplay(g_subsequenceCustomLabel);
-    }
-
-    updateFrameLabelVariables();
-}
-*/
 //
 function endButtonClick(e) {
     // 1) Textbox\-only mode
@@ -525,22 +441,13 @@ function updateFrameLabelVariables() {
 function updateFrameLabelVariables() {
     const labelIds = g_labels[g_currentFrameNr] || [];
     g_currentFrameLabel = getLabelWithId(g_currentFrameLabelId);
-    if (labelIds.length > 0) {
-        g_currentFrameLabelId = labelIds;
-        g_currentFrameLabel = labelIds.map(id => getLabelWithId(id));
 
-        // Create a comma-separated list of label names
-        const labelNames = g_currentFrameLabel.map(label => label.name).join(', ');
-        $('#currentFrameLabel').text(labelNames);
-
-        // Create a styled version with colors
-        const styledLabels = g_currentFrameLabel.map(label => {
-            return `<span style="color: ${label.color}">${label.name}</span>`;
-        }).join(', ');
-        $('#currentFrameLabelDisplay').html(styledLabels);
+    // If current frame is labelled, display label name
+    if (g_currentFrameLabel) {
+        $('#currentFrameLabel').text(g_currentFrameLabel.name);
+        //$('#currentFrameLabel').innerHTML = '<span style="color: ' + g_currentFrameLabelColor + '">' + getLabelWithId(g_currentFrameLabelId).name + '</span>';;
+        $('#currentFrameLabelDisplay').text(g_currentFrameLabel.name);
     } else {
-        g_currentFrameLabelId = [];
-        g_currentFrameLabel = [];
         $('#currentFrameLabel').text('No label');
         $('#currentFrameLabelDisplay').text('No label');
     }
@@ -679,8 +586,6 @@ function loadSequence(
         }
     });
 
-
-
     $("#nextFrameButton").click(function() {
         goToNextKeyFrame();
     });
@@ -762,7 +667,6 @@ function addLabelButton(label_id, label_name, red, green, blue, parent_id) {
         parent_id: parent_id,
     };
     g_labelButtons.push(labelButton);
-
 
     $("#labelButton" + label_id).css("background-color", colorToHexString(red, green, blue));
 
