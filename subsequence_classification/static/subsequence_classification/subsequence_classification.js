@@ -390,6 +390,7 @@ function addSubsequenceLabel(frame_nr, label_id) {
         setupSliderMark(frame_nr, hexColor);
     }
 
+
 }
 
 function updateFrameLabelVariables() {
