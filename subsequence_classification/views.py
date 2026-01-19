@@ -8,10 +8,12 @@ from django.db import transaction
 
 import common.task
 from .models import *
-from annotationweb.models import Task, ImageAnnotation, KeyFrameAnnotation, Label
+from annotationweb.models import Task, ImageAnnotation, KeyFrameAnnotation, Label, TrackingDataSync
 from subsequence_classification.models import FramePrediction
 
 from .models import SubsequenceLabel
+from annotationweb.models import TrackingDataSync
+from django.apps import apps
 
 def label_next_image(request, task_id):
     return label_subsequence(request, task_id, None)
@@ -25,6 +27,7 @@ def get_frame_label_ids(request, frame_id):
         return JsonResponse({'label_ids': label_ids})
     except KeyFrameAnnotation.DoesNotExist:
         return JsonResponse({'error': 'Frame not found'}, status=404)
+
 
 def label_subsequence(request, task_id, image_id):
     """
@@ -41,15 +44,51 @@ def label_subsequence(request, task_id, image_id):
         # Get the sequence
         sequence = context.get("image_sequence")
 
+
+        # Load frame predictions if available
         if sequence:
             print("Loading frame predictions for sequence:", sequence)
-            frame_predictions = FramePrediction.objects.filter(sequence=sequence).order_by("frame_nr")
-            print("Loaded", frame_predictions.count(), "frame predictions")
-            # Print predicted class info for each frame
-            for fp in frame_predictions:
+            frame_predictions_qs = FramePrediction.objects.filter(sequence=sequence).order_by("frame_nr")
+            print("Loaded", frame_predictions_qs.count(), "frame predictions")
+            for fp in frame_predictions_qs:
                 print(f"Frame {fp.frame_nr}: Predicted class = {fp.predicted_class_info}")
-            context["frame_predictions"] = {fp.frame_nr: fp.predicted_class_info for fp in frame_predictions}
+            frame_predictions = {fp.frame_nr: fp.predicted_class_info for fp in frame_predictions_qs}
+
+            # Load tracking data sync if available (obs! (td.id -1) corresponds to frame_nr)
+            tracking_data = TrackingDataSync.objects.filter(subject=sequence.subject).order_by("id")
+            branch_code = {td.id -1: td.branch_code for td in tracking_data}
+
+
+            #print("Frame predictions:", frame_predictions)
+            #print("Branch codes:", branch_code)
+
+            # Choose which source to expose, e.g.:
+            # prefer frame predictions if they exist, otherwise tracking data
+            if frame_predictions:
+                chosen_codes = frame_predictions
+                use_predictions = True
+                print("Using frame predictions")
+                #context["frame_predictions"] = frame_predictions
+                #context["frame_predictions_json"] = json.dumps(frame_predictions)
+            elif branch_code:
+                chosen_codes = branch_code
+                use_predictions = False
+                print("Using branch codes")
+                #context["tracking_data_sync"] = branch_code
+                #context["tracking_data_sync_json"] = json.dumps(branch_code)
+            else:
+                chosen_codes = {}
+                use_predictions = True
+                print("No frame predictions or branch codes available")
+
+            context["frame_predictions"] = frame_predictions
             context["frame_predictions_json"] = json.dumps(context["frame_predictions"])
+            #context["tracking_data_sync"] = branch_code
+            #context["tracking_data_sync_json"] = json.dumps(context["branch_code"])
+
+            context["branch_codes"] = chosen_codes
+            context["branch_codes_json"] = json.dumps(chosen_codes)
+            context["use_predictions"] = use_predictions
 
         # Get label, if image has been already labeled
         try:

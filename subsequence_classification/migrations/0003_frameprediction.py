@@ -8,6 +8,7 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ('annotationweb', '0008_auto_20250627_1439'),
+        #('annotationweb', '0008_auto_20250228_1420'),
         ('subsequence_classification', '0002_auto_20250627_1439'),
     ]
 

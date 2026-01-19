@@ -16,7 +16,7 @@ import os
 from .forms import *
 from .models import *
 from common.user import is_annotater
-
+from django.http import HttpResponseBadRequest
 
 def get_task_statistics(tasks, user):
     for task in tasks:
@@ -125,6 +125,10 @@ def import_options(request, dataset_id, importer_index):
         raise Http404('Dataset does not exist')
 
     available_importers = get_available_importers(dataset)
+    print(available_importers)
+    importer_index = int(importer_index)
+    if importer_index < 0 or importer_index >= len(available_importers):
+        return HttpResponseBadRequest("Invalid importer index")
     importer = available_importers[int(importer_index)]
     importer.dataset = dataset
 

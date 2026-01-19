@@ -204,6 +204,7 @@ class TrackingData(models.Model):
 
 
 class TrackingDataSync(models.Model):
+
     filename = models.CharField(max_length=200)
     timestamp_from_fts = models.PositiveIntegerField(null=True, blank=True)
     matching_timestamp_from_txt = models.FloatField(null=True, blank=True)# PositiveIntegerField()

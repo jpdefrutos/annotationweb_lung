@@ -418,19 +418,51 @@ function updateFrameLabelVariables() {
         $('#currentFrameLabelDisplay').text('No label');
     }
 
-    // --- Update predicted class ---
+
+    // --- Update predicted class or branch code ---
+    console.log('Current frame:', g_currentFrameNr);
+    console.log('Branch codes:', window.branchCodes);
+    console.log('Frame predictions:', window.framePredictions);
     const predictedClassElem = document.getElementById('predicted-class-info');
-    const predictedClassHeader = predictedClassElem.parentElement; // the <h3> that contains the span
+    //const predictedClassHeader = predictedClassElem.parentElement; // the <h3> that contains the span
+    const predictedClassHeader = predictedClassElem ? predictedClassElem.parentElement : undefined;
 
+    if (predictedClassElem) {
+        let value = '';
+        let label = '';
 
-    if (window.framePredictions && window.framePredictions[g_currentFrameNr] !== undefined) {
-        predictedClassElem.textContent = window.framePredictions[g_currentFrameNr];
-        predictedClassHeader.style.display = 'block'; // show <h3> if prediction exists
-    } else {
-        predictedClassElem.textContent = '';
-        predictedClassHeader.style.display = 'none'; // hide <h3> if no prediction
-        predictedClassElem.textContent = 'Prediction not found';
+        const usePred = (typeof window.usePredictions !== 'undefined')
+            ? window.usePredictions
+            : true;
+
+        if (usePred) {
+            if (window.framePredictions &&
+                window.framePredictions[g_currentFrameNr] !== undefined) {
+                value = window.framePredictions[g_currentFrameNr];
+                label = 'Predicted class: ';
+            }
+        } else {
+            if (window.branchCodes &&
+                window.branchCodes[g_currentFrameNr] !== undefined) {
+                value = window.branchCodes[g_currentFrameNr];
+                label = 'Branch code: ';
+            }
+        }
+        predictedClassElem.textContent = value;
+        predictedClassElem.parentElement.firstChild.textContent = label;
+        predictedClassElem.parentElement.style.display = label ? 'block' : 'none';
     }
+
+
+
+    //if (window.framePredictions && window.framePredictions[g_currentFrameNr] !== undefined) {
+    //    predictedClassElem.textContent = window.framePredictions[g_currentFrameNr];
+    //    predictedClassHeader.style.display = 'block'; // show <h3> if prediction exists
+    //} else {
+    //    predictedClassElem.textContent = '';
+    //    predictedClassHeader.style.display = 'none'; // hide <h3> if no prediction
+    //    predictedClassElem.textContent = 'Prediction not found';
+    //}
     //predictedClassHeader.style.display = 'block'; // always show <h3>
     //console.log('Predicted class info:', predictedClass);
     console.log('Predicted class info:', window.framePredictions[g_currentFrameNr]);
@@ -499,6 +531,7 @@ function loadSequence(
         canvas = G_vmlCanvasManager.initElement(canvas);
     }
     g_context = canvas.getContext("2d");
+
 
     if(g_targetFrames.length > 0) {
         g_currentFrameNr = g_targetFrames[0];

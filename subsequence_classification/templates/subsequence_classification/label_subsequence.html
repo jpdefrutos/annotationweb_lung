@@ -5,7 +5,9 @@
 {% block javascript %}
 
     initializeAnnotation({{ task.id }}, {{ image.id }});
-    window.framePredictions = {{ frame_predictions_json|safe }};
+    window.framePredictions = {{ frame_predictions_json|default:'{}'|safe }};
+    window.branchCodes = {{ branch_codes_json|default:'{}'|safe }};
+    window.usePredictions = {% if use_predictions %}true{% else %}false{% endif %};
 
     {% if image_sequence %}
         loadSequence(
@@ -15,7 +17,7 @@
             {%  if task.show_entire_sequence %}true{% else %}false{% endif %},
             {%  if task.user_frame_selection %}true{% else %}false{% endif %},
             {%  if task.annotate_single_frame %}true{% else %}false{% endif %},
-            [ {% for frame_nr in frames %}{{ frame_nr }},{% endfor %}],
+            [ {% for frame_nr in frames %}{{ frame_nr }}{% if not forloop.last %},{% endif %}{% endfor %} ],
             {{ task.frames_before }},
             {{ task.frames_after }},
             {% if task.auto_play %}true{% else %}false{% endif %}
@@ -35,10 +37,7 @@
         addSubsequenceLabel({{ label.image.frame_nr }}, {{ label.label.id }});
     {% endfor %}
 
-    {# Add previously stored subsequence labels if they exist #}
-    {% for label in subsequence_labels %}
-        addSubsequenceLabel({{ label.image.frame_nr }}, {{ label.label.id }});
-    {% endfor %}
+
     updateFrameLabelVariables();
 
     loadSubsequenceClassificationTask({{ image_sequence.id }});
@@ -65,6 +64,7 @@
     {% if image_sequence %}
     {% load get_sequence_name %}
     <h3>Sequence: {{ image_sequence.format|get_sequence_name }}</h3>
+
     <h3>Predicted class: <span id="predicted-class-info"></span></h3>
     <div id="progressbar"><div class="progress-label">Loading...</div></div>
     <div id="sliderText">

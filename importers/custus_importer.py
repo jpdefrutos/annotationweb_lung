@@ -166,13 +166,13 @@ class CustusPatientImporter(Importer):
     def _populate_sync_trackingdata_entry(tracking_data_obj: TrackingDataSync, data_dict: dict):
         tracking_data_obj.filename = str(data_dict['Filename']) #nå blir det feil for den hopper aldri over disse...og da blir det ikke synca!
         tracking_data_obj.timestamp_from_fts = int(data_dict['Timestamp from FTS'])
-        tracking_data_obj.matching_timestamp_from_txt = int(data_dict['Matching Timestamp from TXT']) if data_dict['Matching Timestamp from TXT'] is not -1 else -1 #change to -1
-        tracking_data_obj.branch_number = int(data_dict['Branch number']) if data_dict['Branch number'] is not -1 else -1 #this should be int is float in table
-        tracking_data_obj.position_in_branch = int(data_dict['Position in branch']) if data_dict['Position in branch'] is not -1 else -1
-        tracking_data_obj.branch_length = float(data_dict['Branch length']) if data_dict['Branch length'] is not -1 else -1
-        tracking_data_obj.branch_generation = int(data_dict['Branch generation']) if data_dict['Branch generation'] is not -1 else -1
-        tracking_data_obj.branch_code = data_dict['Branch code'] if data_dict['Branch code'] is not -1 else -1
-        tracking_data_obj.offset = float(data_dict['Offset [mm]']) if data_dict['Offset [mm]'] is not -1 else -1
+        tracking_data_obj.matching_timestamp_from_txt = int(data_dict['Matching Timestamp from TXT']) if data_dict['Matching Timestamp from TXT'] != -1 else -1 #change to -1
+        tracking_data_obj.branch_number = int(data_dict['Branch number']) if data_dict['Branch number'] != -1 else -1 #this should be int is float in table
+        tracking_data_obj.position_in_branch = int(data_dict['Position in branch']) if data_dict['Position in branch'] != -1 else -1
+        tracking_data_obj.branch_length = float(data_dict['Branch length']) if data_dict['Branch length'] != -1 else -1
+        tracking_data_obj.branch_generation = int(data_dict['Branch generation']) if data_dict['Branch generation'] != -1 else -1
+        tracking_data_obj.branch_code = data_dict['Branch code'] if data_dict['Branch code'] != -1 else -1
+        tracking_data_obj.offset = float(data_dict['Offset [mm]']) if data_dict['Offset [mm]'] != -1 else -1
 
     def import_sync_tracking_file(self, sync_tracking_data, subject):
         """
