@@ -38,7 +38,10 @@
 
     <div style="float: left; width: 25%; box-sizing: border-box; padding: 10px;">
         <img src="{% url 'show_image' image.id task.id %}" width="100%">
-        {{ image.format }}<br>
+        {% if task.type != 'blind_classification' %} <!-- do not show image format when the task is blind classification -->
+            {{ image.format }}
+        {% endif %}
+        <br>
 
         {% if image.annotation.finished %}
         {% if image.annotation.rejected %}
@@ -72,7 +75,7 @@
         <a href="{% url 'annotate' task.id image.id %}">Annotate</a><br>
         {% endif %}
         {{ image.annotation_frames | length }} key frames.<br>
-        {% if user.is_staff %}
+        {% if user.is_staff and task.type != 'blind_classification' %}
         <a href="{% url 'select_key_frames' task.id image.id %}">Select key frames</a>
         {% endif %}
 

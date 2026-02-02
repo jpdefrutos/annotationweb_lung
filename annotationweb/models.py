@@ -39,6 +39,7 @@ class Label(models.Model):
 
 class Task(models.Model):
     CLASSIFICATION = 'classification'
+    BLIND_CLASSIFICATION = 'blind_classification'
     BOUNDING_BOX = 'boundingbox'
     LANDMARK = 'landmark'
     CARDIAC_SEGMENTATION = 'cardiac_segmentation'
@@ -49,6 +50,7 @@ class Task(models.Model):
     SPLINE_LINE_POINT = 'spline_line_point'
     TASK_TYPES = (
         (CLASSIFICATION, 'Classification'),
+        (BLIND_CLASSIFICATION, 'Blind classification'),
         (BOUNDING_BOX, 'Bounding box'),
         (LANDMARK, 'Landmark'),
         (CARDIAC_SEGMENTATION, 'Cardiac apical segmentation'),

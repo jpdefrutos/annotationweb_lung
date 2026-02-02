@@ -233,8 +233,8 @@ function goToPreviousKeyFrame() {
     goToFrame(g_targetFrames[i]);
 }
 function loadSequence(image_sequence_id, start_frame, nrOfFrames, show_entire_sequence, user_frame_selection, annotate_single_frame, frames_to_annotate, images_to_load_before, images_to_load_after, auto_play) {
-    // If user cannot select frame, and there are no target frames, select last frame as target frame
-    if(!user_frame_selection && annotate_single_frame && frames_to_annotate.length === 0) {
+    // If user can select frame, and there are no target frames, select last frame as target frame
+    if(user_frame_selection && annotate_single_frame && frames_to_annotate.length === 0) {
         // Select last frame as target frame
         frames_to_annotate.push(nrOfFrames-1);
     }

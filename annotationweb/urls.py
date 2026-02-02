@@ -35,6 +35,7 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('user/', include('user.urls')),
     path('classification/', include('classification.urls')),
+    path('blind_classification/', include('blind_classification.urls')),
     path('boundingbox/', include('boundingbox.urls')),
     path('landmark/', include('landmark.urls')),
     path('cardiac/', include('cardiac.urls')),
