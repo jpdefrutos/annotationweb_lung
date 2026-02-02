@@ -126,7 +126,7 @@ def save_labels(request):
             with transaction.atomic():
                 annotations = common.task.save_annotation(request)
                 frame_labels = json.loads(request.POST['frame_labels'])
-                
+
                 for annotation in annotations:
                     labeled_image = SubsequenceLabel()
                     labeled_image.image = annotation
@@ -235,3 +235,4 @@ def save_labels(request):
             'message': str(e)
         }
     return JsonResponse(response)
+

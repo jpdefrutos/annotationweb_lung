@@ -3,7 +3,6 @@
 {# This template is adapted from the two_column_layout.html template #}
 
 {% block javascript %}
-
     initializeAnnotation({{ task.id }}, {{ image.id }});
     window.framePredictions = {{ frame_predictions_json|default:'{}'|safe }};
     window.branchCodes = {{ branch_codes_json|default:'{}'|safe }};
@@ -36,8 +35,6 @@
         addLabelButton({{ label.label.id }}, "{{ label.label.name }}", {{ label.label.color_red }}, {{ label.label.color_green }}, {{ label.label.color_blue }}, {% if label.label.parent %}{{ label.label.parent.id }}{% else %}0{% endif %});
         addSubsequenceLabel({{ label.image.frame_nr }}, {{ label.label.id }});
     {% endfor %}
-
-
     updateFrameLabelVariables();
 
     loadSubsequenceClassificationTask({{ image_sequence.id }});
