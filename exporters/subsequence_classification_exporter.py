@@ -46,6 +46,15 @@ class SubsequenceClassificationExporter(Exporter):
     def get_form(self, data=None):
         return SubsequenceClassificationExporterForm(self.task, data=data)
 
+    def get_label_path(self, label):
+        # Recursively build the label path from parent labels
+        path = [label.name]
+        parent = getattr(label, 'parent', None)
+        while parent:
+            path.insert(0, parent.name)
+            parent = getattr(parent, 'parent', None)
+        return '-'.join(path)
+
     def export(self, form):
         datasets = form.cleaned_data['dataset']
         delete_existing_data = form.cleaned_data['delete_existing_data']
@@ -72,15 +81,30 @@ class SubsequenceClassificationExporter(Exporter):
             except:
                 return False, 'Path does not exist: ' + path
 
-        # Create label file (mapping label_id to label name)
+        # Collect all labels used in SubsequenceLabel for this task
+        used_label_ids = SubsequenceLabel.objects.filter(
+            image__image_annotation__task=self.task
+        ).values_list('label_id', flat=True).distinct()
+        used_labels = Label.objects.filter(id__in=used_label_ids)
+
+        # Write labels.csv
         label_file = open(os.path.join(path, 'labels.csv'), 'w')
-        label_dict = get_all_labels(task=self.task)
         label_file.write(';'.join(('label_id', 'label_name', 'label_path')) + '\n')
-        for label in label_dict:
-            label_name_full = label['name']
-            label_name = label_name_full.split('-')[-1]
-            label_file.write(';'.join((str(label['id']), label_name, label_name_full)) + '\n')
+        for label in used_labels:
+            label_name = label.name
+            label_path = self.get_label_path(label)
+            label_file.write(';'.join((str(label.id), label_name, label_path)) + '\n')
         label_file.close()
+
+        # Create label file (mapping label_id to label name)
+        #label_file = open(os.path.join(path, 'labels.csv'), 'w')
+        #label_dict = get_all_labels(task=self.task)
+        #label_file.write(';'.join(('label_id', 'label_name', 'label_path')) + '\n')
+        #for label in label_dict:
+        #    label_name_full = label['name']
+        #    label_name = label_name_full.split('-')[-1]
+        #    label_file.write(';'.join((str(label['id']), label_name, label_name_full)) + '\n')
+        #label_file.close()
 
         # Create file_list.txt file
         file_list = open(os.path.join(path, 'file_list.csv'), 'w')
@@ -97,9 +121,12 @@ class SubsequenceClassificationExporter(Exporter):
                 filename_format = image_sequence.image.format
                 file_path = filename_format.replace('#', str(frame_no))
                 # Get image label
-                subsequence_label = keyframe.subsequencelabel
+                #subsequence_label = keyframe.subsequencelabel
                 # Write filepath/label_id pair to the file
-                file_list.write(';'.join((file_path, str(subsequence_label.label.id))) + '\n')
+                #file_list.write(';'.join((file_path, str(subsequence_label.label.id))) + '\n')
+                subsequence_labels = SubsequenceLabel.objects.filter(image=keyframe)
+                label_ids = [str(sl.label.id) for sl in subsequence_labels]
+                file_list.write(';'.join((file_path, ','.join(label_ids))) + '\n')
 
         file_list.close()
 

@@ -6,31 +6,44 @@ let g_currentFrameLabelId = -1;
 let g_currentFrameLabel = null;
 let g_currentFrameLabelColor = '#3d6ad8';
 
+let g_selectedLabels = [];
+let g_subsequenceStartFrame = null; // Start frame of subsequence
+// Store custom labels for each frame
+let g_customFrameLabels = {};
+let g_subsequenceCustomLabel = null;
 
-// TODO: Modify function. For now, copied from classification.js
+
+function isTextboxOnlyMode() {
+    // Activate textbox mode if any label is named "textbox"
+    return g_labelButtons.some(
+        l => typeof l.name === 'string' && l.name.toLowerCase() === 'textbox'
+    );
+}
+
+function isSingleNonTextboxMode() {
+    return g_labelButtons.length === 1 && !isTextboxOnlyMode();
+}
+
 function loadSubsequenceClassificationTask() {
-    console.log('In load subsequence classification')
+    console.log('In load subsequence classification');
 
-    // Add click listener for label buttons to trigger save
-    for (let i = 0; i < g_labelButtons.length; ++i) {
-        let label_id = g_labelButtons[i].id;
-        $('#labelButton' + label_id).click(function () {
-            // TODO: Implement functionality when clicking a label button here
-            console.log('labelButton with id ' + $(this).id + ' was clicked');
-            console.log($(this));
-
-            // Trigger pop-up with "Start/End segment"
-            let dialogDiv = document.createElement('div');
-            dialogDiv.className = 'smallFrame';
-
-            // If this segment was started with the same label
-            //  --> only allow "End"
-            // If this segment was started with another label
-            //  --> only allow start
-            //  --> start a new segment with the other label
-            //  --> also end the previous segment on the previous frame
-
-        });
+    // Only set up multi\-label button toggling if there are >1 labels
+    if (g_labelButtons.length > 1) {
+        g_selectedLabels = [];
+        for (let i = 0; i < g_labelButtons.length; ++i) {
+            let label_id = g_labelButtons[i].id;
+            $('#labelButton' + label_id).click(function () {
+                $(this).toggleClass('activeLabel');
+                if ($(this).hasClass('activeLabel')) {
+                    if (!g_selectedLabels.includes(label_id)) {
+                        g_selectedLabels.push(label_id);
+                    }
+                } else {
+                    g_selectedLabels = g_selectedLabels.filter(id => id !== label_id);
+                }
+                console.log('Selected labels:', g_selectedLabels);
+            });
+        }
     }
 
     setupSubsequenceClassification();
@@ -41,6 +54,23 @@ function loadSubsequenceClassificationTask() {
     endSubsequence.onclick = endButtonClick;
 }
 
+
+
+/*
+function sendDataForSave(frameId, labelIds) {
+    return $.ajax({
+        type: "POST",
+        url: "/subsequence-classification/save/",
+        contentType: "application/json",
+        data: JSON.stringify({
+            frame_id: frameId,
+            label_ids: labelIds
+        }),
+        dataType: "json"
+    });
+}
+*/
+// Function to send data for saving
 function sendDataForSave() {
     return $.ajax({
         type: "POST",
@@ -49,6 +79,7 @@ function sendDataForSave() {
             image_id: g_imageID,
             task_id: g_taskID,
             frame_labels: JSON.stringify(g_labels),
+            custom_frame_labels: JSON.stringify(g_customFrameLabels), // Send custom labels as JSON string
             target_frames: JSON.stringify(g_targetFrames),
             quality: $('input[name=quality]:checked').val() || 'unknown', // Default to unknown if no quality is selected
             rejected: g_rejected ? 'true':'false',
@@ -58,45 +89,158 @@ function sendDataForSave() {
     });
 }
 
-function startButtonClick(e) {
-
-    if (g_currentLabel === -1) {
-        if (g_labelButtons.length === 1) {
-            changeLabel(g_labelButtons[0].id)
-            console.log('only one label button')
-        }
-        else {
-            alert('You need to select a label before marking a subsequence!');
-            return;
-        }
-    }
-
-    console.log('Subsequence for', getLabelWithId(g_currentLabel).name, 'started on frame nr', g_currentFrameNr);
-
-    // Label current frame as first in sequence
-    $('#currentFrame').text(g_currentFrameNr);
-    addKeyFrame(g_currentFrameNr);
-    setLabel(g_currentFrameNr, g_currentLabel);
-
-    // Find next frame belonging to a different sequence (if any)
-    let nextFrameWithDifferentLabel = findNextFrameWithDifferentLabel(g_currentFrameNr);
-    if (nextFrameWithDifferentLabel === -1) {
-        console.log('No frame found with different label');
-    }
-    let lastFrame = g_startFrame + g_sequenceLength;
-    let frameIdx = g_currentFrameNr;
-    while (frameIdx  < min(nextFrameWithDifferentLabel, lastFrame)) {
-        frameIdx++;
-        //addKeyFrame(frameIdx);
-        setLabel(frameIdx, g_currentLabel);
-    }
-
-    updateFrameLabelVariables();
+function updateCurrentFrameLabelDisplay(label) {
+    const leftLabel = document.getElementById('currentFrameLabel');
+    const rightLabel = document.getElementById('currentFrameLabelDisplay');
+    if (leftLabel) leftLabel.textContent = label;
+    if (rightLabel) rightLabel.textContent = label;
 }
 
+// javascript
+function startButtonClick(e) {
+    // 1) Textbox\-only mode
+    if (isTextboxOnlyMode()) {
+        const inputEl = document.getElementById('customLabelInput');
+        if (!inputEl) {
+            alert('Textbox element not found. Please check the template for the textbox only configuration.');
+            return;
+        }
+        const label = inputEl.value.trim();
+        if (!label) {
+            alert('Please enter a label before marking a subsequence!');
+            return;
+        }
+        g_subsequenceStartFrame = g_currentFrameNr;
+        g_subsequenceCustomLabel = label;
+        g_subsequenceLabels = null;
+        updateCurrentFrameLabelDisplay(label);
+        console.log('Start subsequence (textbox) at frame', g_currentFrameNr, 'Label:', label);
+        return;
+    }
+
+    // 2) Multi\-label mode: two or more labels
+    if (g_labelButtons.length > 1 &&
+    !g_labelButtons.some(l => typeof l.name === 'string' && l.name.toLowerCase() === 'textbox')
+    ) {
+        if (!Array.isArray(g_selectedLabels) || g_selectedLabels.length === 0) {
+            alert('You need to select at least one label before marking a subsequence!');
+            return;
+        }
+        g_subsequenceStartFrame = g_currentFrameNr;
+        g_subsequenceCustomLabel = null;
+        g_subsequenceLabels = [...g_selectedLabels];
+
+        const labelNames = g_subsequenceLabels
+            .map(id => getLabelWithId(id))
+            .filter(Boolean)
+            .map(l => l.name)
+            .join(', ');
+
+        updateCurrentFrameLabelDisplay(labelNames);
+        console.log('Start subsequence (multi label) at frame', g_currentFrameNr, 'Labels:', g_subsequenceLabels);
+        return;
+    }
+
+    // 3) Single non\-textbox label
+    if (isSingleNonTextboxMode()) {
+        g_subsequenceStartFrame = g_currentFrameNr;
+        g_subsequenceCustomLabel = null;
+        g_subsequenceLabels = [g_labelButtons[0].id];
+
+        updateCurrentFrameLabelDisplay(g_labelButtons[0].name);
+        console.log('Start subsequence (single label) at frame', g_currentFrameNr, 'Label:', g_subsequenceLabels[0]);
+        return;
+    }
+
+    alert('Configuration error: no valid subsequence mode detected.');
+}
+
+
+//
 function endButtonClick(e) {
-    if (!g_currentLabel) {
-        alert('You need to select a label before marking a subsequence!');
+    // 1) Textbox\-only mode
+    if (isTextboxOnlyMode()) {
+        if (g_subsequenceStartFrame === null || g_subsequenceCustomLabel === null) {
+            alert('You need to start a subsequence first!');
+            return;
+        }
+
+        const color = '#ff0000';
+        for (let frame = g_subsequenceStartFrame; frame <= g_currentFrameNr; frame++) {
+            g_customFrameLabels[frame] = g_subsequenceCustomLabel;
+            setupSliderMark(frame, color);
+        }
+
+        const nextFrame = g_currentFrameNr + 1;
+        if (nextFrame < g_framesLoaded) {
+            g_customFrameLabels[nextFrame] = g_subsequenceCustomLabel;
+            setupSliderMark(nextFrame, color);
+        }
+
+        g_subsequenceStartFrame = null;
+        g_subsequenceCustomLabel = null;
+        updateFrameLabelVariables();
+        return;
+    }
+
+    // 2) Multi\-label mode (two or more labels)
+    if (g_labelButtons.length > 1) {
+        if (g_subsequenceStartFrame === null ||
+            !Array.isArray(g_subsequenceLabels) ||
+            g_subsequenceLabels.length === 0) {
+            alert('You need to start a subsequence first!');
+            return;
+        }
+
+        const start = Math.min(g_subsequenceStartFrame, g_currentFrameNr);
+        const end = Math.max(g_subsequenceStartFrame, g_currentFrameNr);
+
+        for (let frameIdx = start; frameIdx <= end; frameIdx++) {
+            addKeyFrame(frameIdx);
+            setLabel(frameIdx, g_subsequenceLabels);
+        }
+
+        sliderMarkSubsequence(start, end, getLabelWithId(g_subsequenceLabels[0]));
+        g_subsequenceStartFrame = null;
+        g_subsequenceLabels = [];
+        updateFrameLabelVariables();
+        return;
+    }
+
+    // 3) Single non\-textbox label
+    if (isSingleNonTextboxMode()) {
+        if (g_subsequenceStartFrame === null ||
+            !Array.isArray(g_subsequenceLabels) ||
+            g_subsequenceLabels.length === 0) {
+            alert('You need to start a subsequence first!');
+            return;
+        }
+
+        const start = Math.min(g_subsequenceStartFrame, g_currentFrameNr);
+        const end = Math.max(g_subsequenceStartFrame, g_currentFrameNr);
+
+        for (let frameIdx = start; frameIdx <= end; frameIdx++) {
+            addKeyFrame(frameIdx);
+            setLabel(frameIdx, g_subsequenceLabels);
+        }
+
+        sliderMarkSubsequence(start, end, getLabelWithId(g_subsequenceLabels[0]));
+        g_subsequenceStartFrame = null;
+        g_subsequenceLabels = [];
+        updateFrameLabelVariables();
+        return;
+    }
+
+    alert('Configuration error: no valid subsequence mode detected.');
+}
+
+
+
+/*
+// Old endButtonClick function, kept for reference
+function endButtonClick(e) {
+    if (!Array.isArray(g_selectedLabels) || g_selectedLabels.length === 0) {
+        alert('You need to select at least one label before ending a subsequence!');
         return;
     }
 
@@ -105,27 +249,32 @@ function endButtonClick(e) {
         return;
     }
 
-    console.log('Subsequence for', g_currentLabel, 'ended on frame nr', g_currentFrameNr);
+    console.log('Subsequence ended on frame', g_currentFrameNr, 'with labels:', g_selectedLabels);
 
-    // Find start of subsequence with same label
-    let startOfSubsequence = findPreviousFrameWithSameLabel(g_currentFrameNr, g_currentLabel);
-    let lastFrame = g_startFrame + g_sequenceLength;
-    let frameIdx = startOfSubsequence;
-    while (frameIdx <= min(g_currentFrameNr, lastFrame)) {
-        // console.log('Add label', g_currentLabel, 'to frame', frameIdx);
-        addKeyFrame(frameIdx);
-        setLabel(frameIdx, g_currentLabel);
-        updateFrameLabelVariables();
-        frameIdx++;
+    // Find start of subsequence with same labels
+    let startOfSubsequence = g_currentFrameNr;
+    for (let i = g_currentFrameNr; i >= g_startFrame; i--) {
+        // Compare arrays by stringifying (simple approach)
+        if (JSON.stringify(g_labels[i]) === JSON.stringify(g_selectedLabels)) {
+            startOfSubsequence = i;
+        } else {
+            break;
+        }
     }
-    // Add one mark for entire subsequence
-    sliderMarkSubsequence(startOfSubsequence, min(g_currentFrameNr, lastFrame), g_currentLabel);
 
-    // Label the current frame as the last in the subsequence
-    // frameIdx = g_currentFrameNr;
-    // addKeyFrame(frameIdx);
-    // setLabel(frameIdx, g_currentLabel);
+    let lastFrame = g_startFrame + g_sequenceLength;
+    for (let frameIdx = startOfSubsequence; frameIdx <= Math.min(g_currentFrameNr, lastFrame); frameIdx++) {
+        addKeyFrame(frameIdx);
+        setLabel(frameIdx, g_selectedLabels);
+        updateFrameLabelVariables();
+    }
+
+    // Add one mark for entire subsequence
+    sliderMarkSubsequence(startOfSubsequence, Math.min(g_currentFrameNr, lastFrame), getLabelWithId(g_selectedLabels[0]));
+
+    updateFrameLabelVariables();
 }
+*/
 
 function setupSubsequenceClassification() {
     console.log('Setting up subsequence classification....');
@@ -145,9 +294,13 @@ function setupSubsequenceClassification() {
         g_labels = {}; // Remove all labels
         g_targetFrames = []; // Remove all target frames
         removeAllSliderMarks(); // Remove all slider marks
+        g_customFrameLabels = {};
+        g_subsequenceStartFrame = null;
+        g_subsequenceCustomLabel = null;
          if (g_labelButtons.length > 1) {
              g_currentLabel = -1; // Set all label buttons to inactive
          }
+
     });
 
     //changeLabel(g_labelButtons[0].id);    // Set first label active
@@ -164,6 +317,7 @@ function setupSubsequenceClassification() {
             setLabel(frame_nr, frameLabelId);
         }
     }
+
 }
 
 function findNextFrameWithDifferentLabel(frameIdx, labelId) {
@@ -195,29 +349,130 @@ function redrawSequence() {
     g_context.drawImage(g_sequence[index], 0, 0, g_canvasWidth, g_canvasHeight); // Draw background image
 }
 
-function setLabel(frame_nr, label_id) {
-    // Set label for frame
-    g_labels[frame_nr] = label_id;
+function setLabel(frame_nr, label_ids) {
+    // Ensure label_ids is always an array
+    if (!Array.isArray(label_ids)) {
+        label_ids = [label_ids];
+    }
+    g_labels[frame_nr] = label_ids;
 
-    // Update slider marker for frame
-    let label = getLabelWithId(label_id);
-    let hexColor =  colorToHexString(label.red, label.green, label.blue);
+    // Update slider marker for frame (use first label's color or customize)
+    let label = getLabelWithId(label_ids[0]);
+    let hexColor = colorToHexString(label.red, label.green, label.blue);
     setupSliderMark(frame_nr, hexColor);
 }
 
+
+/* original addSubsequenceLabel function, kept for reference
 function addSubsequenceLabel(frame_nr, label_id) {
     addKeyFrame(frame_nr);
     setLabel(frame_nr, label_id);
 }
+*/
 
+function addSubsequenceLabel(frame_nr, label_id) {
+    addKeyFrame(frame_nr);
+    // Ensure g_labels[frame_nr] is an array
+    if (!g_labels[frame_nr]) {
+        g_labels[frame_nr] = [];
+    }
+    if (!g_labels[frame_nr].includes(label_id)) {
+        g_labels[frame_nr].push(label_id);
+    }
+    // Label all frames in a subsequence
+    //for (let frame = g_subsequenceStartFrame; frame <= g_subsequenceEndFrame; frame++) {
+    // addSubsequenceLabel(frame, label_id);
+    //}
+    // Optionally update slider marker for the first label
+    let label = getLabelWithId(g_labels[frame_nr][0]);
+    if (label) {
+        let hexColor = colorToHexString(label.red, label.green, label.blue);
+        setupSliderMark(frame_nr, hexColor);
+    }
+
+
+}
 
 function updateFrameLabelVariables() {
-    // Update g_currentFrameLabelId/g_currentFrameLabel if current frame is labelled
-    if (g_currentFrameNr in g_labels) {
-        g_currentFrameLabelId = g_labels[g_currentFrameNr];
-    } else {
-        g_currentFrameLabelId = -1;
+    // --- Update current frame label --- // Check for custom label first
+    const customLabel = g_customFrameLabels[g_currentFrameNr];
+    if (customLabel) {
+        $('#currentFrameLabel').text(customLabel);
+        $('#currentFrameLabelDisplay').text(customLabel);
+        return;
     }
+    const labelIds = g_labels[g_currentFrameNr] || [];
+    if (labelIds.length > 0) {
+        //const labelObjs = labelIds.map(id => getLabelWithId(id));
+        // Filter out nulls to avoid errors
+        const labelObjs = labelIds.map(id => getLabelWithId(id)).filter(label => label !== null);
+        const labelNames = labelObjs.map(label => label.name).join(', ');
+        $('#currentFrameLabel').text(labelNames);
+
+        const styledLabels = labelObjs.map(label => {
+            return `<span style="color: ${colorToHexString(label.red, label.green, label.blue)}">${label.name}</span>`;
+        }).join(', ');
+        $('#currentFrameLabelDisplay').html(styledLabels);
+    } else {
+        $('#currentFrameLabel').text('No label');
+        $('#currentFrameLabelDisplay').text('No label');
+    }
+
+
+    // --- Update predicted class or branch code ---
+    console.log('Current frame:', g_currentFrameNr);
+    console.log('Branch codes:', window.branchCodes);
+    console.log('Frame predictions:', window.framePredictions);
+    const predictedClassElem = document.getElementById('predicted-class-info');
+    //const predictedClassHeader = predictedClassElem.parentElement; // the <h3> that contains the span
+    const predictedClassHeader = predictedClassElem ? predictedClassElem.parentElement : undefined;
+
+    if (predictedClassElem) {
+        let value = '';
+        let label = '';
+
+        const usePred = (typeof window.usePredictions !== 'undefined')
+            ? window.usePredictions
+            : true;
+
+        if (usePred) {
+            if (window.framePredictions &&
+                window.framePredictions[g_currentFrameNr] !== undefined) {
+                value = window.framePredictions[g_currentFrameNr];
+                label = 'Predicted class: ';
+            }
+        } else {
+            if (window.branchCodes &&
+                window.branchCodes[g_currentFrameNr] !== undefined) {
+                value = window.branchCodes[g_currentFrameNr];
+                label = 'Branch code: ';
+            }
+        }
+        predictedClassElem.textContent = value;
+        predictedClassElem.parentElement.firstChild.textContent = label;
+        predictedClassElem.parentElement.style.display = label ? 'block' : 'none';
+    }
+
+
+
+    //if (window.framePredictions && window.framePredictions[g_currentFrameNr] !== undefined) {
+    //    predictedClassElem.textContent = window.framePredictions[g_currentFrameNr];
+    //    predictedClassHeader.style.display = 'block'; // show <h3> if prediction exists
+    //} else {
+    //    predictedClassElem.textContent = '';
+    //    predictedClassHeader.style.display = 'none'; // hide <h3> if no prediction
+    //    predictedClassElem.textContent = 'Prediction not found';
+    //}
+    //predictedClassHeader.style.display = 'block'; // always show <h3>
+    //console.log('Predicted class info:', predictedClass);
+    console.log('Predicted class info:', window.framePredictions[g_currentFrameNr]);
+}
+
+
+
+/*
+function updateFrameLabelVariables() {
+    const labelIds = g_labels[g_currentFrameNr] || [];
     g_currentFrameLabel = getLabelWithId(g_currentFrameLabelId);
 
     // If current frame is labelled, display label name
@@ -242,6 +497,7 @@ function updateFrameLabelVariables() {
         predictedClassHeader.style.display = 'none'; // hide <h3> if no prediction
     }
 }
+*/
 
 function dictDelete(dict, key) {
     if (dict.hasOwnProperty(key)) {
@@ -287,6 +543,7 @@ function loadSequence(
         canvas = G_vmlCanvasManager.initElement(canvas);
     }
     g_context = canvas.getContext("2d");
+
 
     if(g_targetFrames.length > 0) {
         g_currentFrameNr = g_targetFrames[0];
@@ -366,7 +623,8 @@ function loadSequence(
         if(g_targetFrames.includes(g_currentFrameNr)) {
             g_targetFrames.splice(g_targetFrames.indexOf(g_currentFrameNr), 1);
             g_currentTargetFrameIndex = -1;
-            $('#sliderMarker' + g_currentFrameNr).remove();
+            $('#sliderMarker' + g_currentFrameNr).css('background-color', '#888888'); //change color to gray
+            //$('#sliderMarker' + g_currentFrameNr).remove();
             $('#selectedFrames' + g_currentFrameNr).remove();
             $('#selectedFramesForm' + g_currentFrameNr).remove();
             g_labels = dictDelete(g_labels, g_currentFrameNr);
@@ -538,12 +796,12 @@ function incrementFrame() {
 
 function goToFrame(frameNr) {
     setPlayButton(false);
-    g_currentFrameNr = min(max(0, frameNr), g_framesLoaded-1);
+    g_currentFrameNr = Math.min(Math.max(0, frameNr), g_framesLoaded-1);
     $('#slider').slider('value', frameNr); // Update slider
     $('#currentFrame').text(g_currentFrameNr);
     updateFrameLabelVariables();
     var marker_index = g_targetFrames.findIndex(index => index === frameNr);
-    if(marker_index) {
+    if(marker_index !== -1) {
         g_currentTargetFrameIndex = g_currentFrameNr;
     } else {
         g_currentTargetFrameIndex = -1;

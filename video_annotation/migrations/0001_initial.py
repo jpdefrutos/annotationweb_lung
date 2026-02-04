@@ -19,6 +19,8 @@ class Migration(migrations.Migration):
                 ('id', models.AutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
                 ('x', models.PositiveIntegerField()),
                 ('y', models.PositiveIntegerField()),
+                ('height', models.PositiveIntegerField()),
+                ('width', models.PositiveIntegerField()),
                 ('image', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='annotationweb.KeyFrameAnnotation')),
                 ('label', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='annotationweb.Label')),
             ],

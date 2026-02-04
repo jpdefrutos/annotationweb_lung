@@ -4,7 +4,9 @@
 
 {% block javascript %}
     initializeAnnotation({{ task.id }}, {{ image.id }});
-    window.framePredictions = {{ frame_predictions_json|safe }};
+    window.framePredictions = {{ frame_predictions_json|default:'{}'|safe }};
+    window.branchCodes = {{ branch_codes_json|default:'{}'|safe }};
+    window.usePredictions = {% if use_predictions %}true{% else %}false{% endif %};
 
     {% if image_sequence %}
         loadSequence(
@@ -14,27 +16,28 @@
             {%  if task.show_entire_sequence %}true{% else %}false{% endif %},
             {%  if task.user_frame_selection %}true{% else %}false{% endif %},
             {%  if task.annotate_single_frame %}true{% else %}false{% endif %},
-            [ {% for frame_nr in frames %}{{ frame_nr }},{% endfor %}],
+            [ {% for frame_nr in frames %}{{ frame_nr }}{% if not forloop.last %},{% endif %}{% endfor %} ],
             {{ task.frames_before }},
             {{ task.frames_after }},
             {% if task.auto_play %}true{% else %}false{% endif %}
         );
     {% endif %}
 
-    loadSubsequenceClassificationTask({{ image_sequence.id }});
+
 
     {# Add label buttons #}
     {% for label in labels %}
         addLabelButton({{ label.id }}, "{{ label.name }}", {{ label.color_red }}, {{ label.color_green }}, {{ label.color_blue }}, {% if label.parent %}{{ label.parent.id }}{% else  %}0{% endif %});
     {% endfor %}
 
-
-    {# Add previously stored subsequence labels if they exist #}
+    {# Add custom label button(?)#}
     {% for label in subsequence_labels %}
+        addLabelButton({{ label.label.id }}, "{{ label.label.name }}", {{ label.label.color_red }}, {{ label.label.color_green }}, {{ label.label.color_blue }}, {% if label.label.parent %}{{ label.label.parent.id }}{% else %}0{% endif %});
         addSubsequenceLabel({{ label.image.frame_nr }}, {{ label.label.id }});
     {% endfor %}
     updateFrameLabelVariables();
 
+    loadSubsequenceClassificationTask({{ image_sequence.id }});
 
     {% if return_url %}
         setReturnURL('{{ return_url|safe }}');
@@ -58,6 +61,7 @@
     {% if image_sequence %}
     {% load get_sequence_name %}
     <h3>Sequence: {{ image_sequence.format|get_sequence_name }}</h3>
+
     <h3>Predicted class: <span id="predicted-class-info"></span></h3>
     <div id="progressbar"><div class="progress-label">Loading...</div></div>
     <div id="sliderText">
@@ -95,21 +99,24 @@
     </div>
     <br>
 
-    {% comment %}
-    <!-- TODO: Fix image quality selection for subsequence classification -->
+{% if task.image_quality %}
     <div id="imageQuality">
-    <form id="imageQualityForm">
-        Image quality:
-        {% for quality_id, quality_name in image_quality_choices %}
-        <input type="radio" name="quality" value="{{ quality_id }}" required{% if chosen_quality == quality_id %} checked="checked"{% endif %}> {{ quality_name }}
-        {% endfor %}
-    </form>
+        <form id="imageQualityForm">
+            Image quality:
+            {% for quality_id, quality_name in image_quality_choices %}
+                {% if quality_id != 'unknown' %}
+                   <input type="radio" name="quality" value="{{ quality_id }}" required{% if chosen_quality == quality_id %} checked="checked"{% endif %}> {{ quality_name }}
+                {% endif %}
+            {% endfor %}
+        </form>
     </div>
-    {% endcomment %}
+{%  endif %}
 
     {% if toplabels|length > 1 %}
     <h3>Labels</h3>
 
+
+{% comment %}
     <div id="labelButtons">
         {% block label_buttons %}
             <div class="flexButtons">
@@ -130,6 +137,36 @@
             {% endfor %}
 
         {% endblock label_buttons %}
+    </div>
+{% endcomment %}
+
+
+    <div id="labelButtons">
+    {% block label_buttons %}
+        <div class="flexButtons">
+            {% for label in toplabels %}
+                <button class="labelButton" data-label-id="{{ label.id }}" id="labelButton{{ label.id }}">{{ label.name }}</button>
+            {% endfor %}
+        </div>
+
+        {% for sublabel in sublabels %}
+            <div id="sublabel_{{ sublabel.id }}">
+                <hr>
+                <div class="flexButtons">
+                        {% for label in sublabel.labels %}
+                            <button class="labelButton" data-label-id="{{ label.id }}" id="labelButton{{ label.id }}">{{ label.name }}</button>
+                        {% endfor %}
+                    </div>
+                </div>
+            {% endfor %}
+        {% endblock label_buttons %}
+    </div>
+
+
+    {% elif toplabels|length == 1 and toplabels.0.name|lower == 'textbox' %}
+    <div>
+        <label for="customLabelInput">Enter label:</label>
+        <input type="text" id="customLabelInput" placeholder="Type label here">
     </div>
 
     <h3>Mark subsequence </h3>

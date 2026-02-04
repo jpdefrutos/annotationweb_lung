@@ -3,9 +3,13 @@
 /venv
 /env
 /segmentations
+/imported_data
+/annotationweb/migrations
 *.sqlite3
 *.log
 *.pot
 *.pyc
+*.bu*
 __pycache__/
 /static
+.gitignore
