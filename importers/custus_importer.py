@@ -8,7 +8,6 @@ import csv
 import sqlite3
 
 import warnings
-from plum.exceptions import ImplementationError
 from typing import Union, Tuple, List
 from xml.dom import minidom
 import re
