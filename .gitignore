@@ -10,6 +10,7 @@
 *.pot
 *.pyc
 *.bu*
+*.csv
 __pycache__/
 /static
 .gitignore
