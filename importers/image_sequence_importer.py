@@ -83,8 +83,10 @@ class ImageSequenceImporter(Importer):
         return True, path
 
     def _parse_sequence_dir(self, image_sequence_dir):
-        # Count nr of frames
-        # Handle only monotype sequence: .mhd or .png or .jpg
+        """
+        Count nr of frames
+        Handle only monotype sequence: .mhd or .png or .jpg
+        """
         name = None
         frames = list()
         extension = None

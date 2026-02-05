@@ -1,23 +1,17 @@
-from cProfile import label
-from email.policy import default
-from multiprocessing.sharedctypes import synchronized
 
-import numpy as np
+
 import os
 import csv
-import sqlite3
 
 import warnings
-from plum.exceptions import ImplementationError
-from typing import Union, Tuple, List
+from typing import List
 from xml.dom import minidom
 import re
-
-from annotationweb.models import TrackingData, TrackingDataSync, VolumetricImage, Dataset, Subject, ImageSequence
+from annotationweb.models import TrackingDataSync, VolumetricImage, Subject
 from annotationweb.settings import BASE_DIR
-from importers.image_sequence_importer import ImageSequenceImporter, ImageSequenceImporterForm
-from shutil import copy2, copytree
-from common.importer import Importer, importers
+from importers.image_sequence_importer import ImageSequenceImporter
+from shutil import copy2
+from common.importer import Importer
 from django import forms
 import SimpleITK as sitk
 
@@ -25,8 +19,10 @@ import SimpleITK as sitk
 ROOT_PATH = os.path.join(BASE_DIR, 'imported_data')
 
 class CustusPatientImporterForm(forms.Form):
+    """
+    Form for the Custus/Fraxinus patient importer. Shows up on the web interface when selecting the importer.
+    """
     path = forms.CharField(label='Data path', max_length=1000)
-    #create_table = forms.BooleanField(label='Create table', required=False)
     create_table = forms.BooleanField(label='Create table', required=False)
     convert_nifti = forms.BooleanField(label='Convert images to Nifti', required=False)
     image_formats = forms.MultipleChoiceField(label='Accepted 3D image formats', required=True,
@@ -42,10 +38,13 @@ class CustusPatientImporterForm(forms.Form):
         super(CustusPatientImporterForm, self).__init__(data)
 
     def clean(self):
+        """
+        Validate the form fields.
+        """
         super(CustusPatientImporterForm, self).clean()
         patient_folder = self.cleaned_data.get('path')
         create_table = self.cleaned_data.get('create_table')
-        #create_sync_table = self.cleaned_data.get('create_sync_table')
+
         convert_nifti = self.cleaned_data.get('convert_nifti')
         image_formats = self.cleaned_data.get('image_formats')
 
@@ -54,9 +53,6 @@ class CustusPatientImporterForm(forms.Form):
 
         if create_table is None:
             self.cleaned_data['create_table'] = False
-
-        #if create_sync_table is None:
-        #    self.cleaned_data['create_sync_table'] = False
 
         if convert_nifti is None:
             self.cleaned_data['convert_nifti'] = False
@@ -70,19 +66,13 @@ class CustusPatientImporterForm(forms.Form):
 
 
 class CustusPatientImporter(Importer):
-    #HEADER = ('Timestamp','Branch number', 'Position in branch', 'Branch length', 'Branch generation', 'branchCode', 'Offset [mm]')
+
     HEADER = ('Filename', 'Timestamp from FTS', 'Matching Timestamp from TXT','Branch number', 'Position in branch', 'Branch length', 'Branch generation', 'branchCode', 'Offset [mm]')
     DELIMITER = ';'
     ALL_IMG_FORMATS = ('vtk', 'dcm', 'nii', 'nii.gz', 'mhd', 'zraw', 'raw')
     DICT_SEQUENCE_TYPES = {'US_Acq': 'US', 'BronchoscopyVideo': 'BV'}
-    REG_EXP_ACCEPTED_VOL_IMAGES = f'\.({"|".join(ALL_IMG_FORMATS)})$'# f'\_.+\d+\.({"|".join(IMAGE_FORMATS)})'
-    #TRACKING_FIELDNAMES = ['Timestamp',
-    #                       'Branch number',
-    #                       'Position in branch',
-    #                       'Branch length',
-    #                       'Branch generation',
-    #                       'Branch code',
-    #                       'Offset [mm]']
+    REG_EXP_ACCEPTED_VOL_IMAGES = f'\.({"|".join(ALL_IMG_FORMATS)})$'
+
     TRACKING_FIELDNAMES = ['Filename',
                            'Timestamp from FTS',
                            'Matching Timestamp from TXT',
@@ -94,7 +84,6 @@ class CustusPatientImporter(Importer):
                            'Offset [mm]']
 
     patient_folder = None
-    #create_table = None
     create_table = None
     dataset = None
     convert_nifti = False
@@ -105,7 +94,7 @@ class CustusPatientImporter(Importer):
 
     def __init__(self, *args, **kwargs):
         """
-        Import Custus/Fraxinus patient files. The image sequences will be moves to BASE_DIR/imported_data folder,
+        Import Custus/Fraxinus patient files. The image sequences will be moved to BASE_DIR/imported_data folder,
         following the structured expected by the ImageSequenceImporter.
         """
         super().__init__(*args, **kwargs)
@@ -115,8 +104,10 @@ class CustusPatientImporter(Importer):
         return CustusPatientImporterForm(data)
 
     def import_data(self, form: forms.Form):
+        """
+        Import the data according to the given form. The tracking data are synchronized to the images.
+        """
         self.patient_folder = form.cleaned_data['path']
-        #self.create_table = form.cleaned_data['create_table']
         self.create_table = form.cleaned_data['create_table']
         self.convert_nifti = form.cleaned_data['convert_nifti']
         self.image_formats = form.cleaned_data['image_formats']
@@ -146,25 +137,25 @@ class CustusPatientImporter(Importer):
             subject.dataset = self.dataset
         subject.save()
 
-        # Import the US sequence
+        # Import the US sequence, TODO: check if already imported?
         imported_sequences = self.import_sequences(sequences_paths, subject)
 
         # Import the volumetric image
         self.import_volumetric_image(images_paths, subject)
 
-        # Import the tracking form
-        #self.import_tracking_file(tracking_files, subject, imported_sequences)
 
         # sync tracking data to images:
         sync_tracking_data = self.sync_tracking_data(sequences, tracking_files, timestamp_files)
         print(sync_tracking_data)
-        #self.synch_tracking_data(sequences, tracking_files, timestamp_files)
         self.import_sync_tracking_file(sync_tracking_data, subject)
         return True, imported_patient_dir
 
     @staticmethod
     def _populate_sync_trackingdata_entry(tracking_data_obj: TrackingDataSync, data_dict: dict):
-        tracking_data_obj.filename = str(data_dict['Filename']) #nå blir det feil for den hopper aldri over disse...og da blir det ikke synca!
+        """
+        Populate a TrackingDataSync entry from a dictionary. Used by the import_sync_tracking_file function.
+        """
+        tracking_data_obj.filename = str(data_dict['Filename'])
         tracking_data_obj.timestamp_from_fts = int(data_dict['Timestamp from FTS'])
         tracking_data_obj.matching_timestamp_from_txt = int(data_dict['Matching Timestamp from TXT']) if data_dict['Matching Timestamp from TXT'] != -1 else -1 #change to -1
         tracking_data_obj.branch_number = int(data_dict['Branch number']) if data_dict['Branch number'] != -1 else -1 #this should be int is float in table
@@ -182,60 +173,16 @@ class CustusPatientImporter(Importer):
             subject: ID of te Subject entry
             image_sequences: name and ID of the ImageSequence entries
         """
-        #seq_dict =self._group_sequences_by_name(image_sequences)
-        #for f in sync_tracking_data:
+
         with open(sync_tracking_data, 'r') as csvfile:
             csvreader = csv.DictReader(csvfile, fieldnames=self.TRACKING_FIELDNAMES, delimiter=self.DELIMITER)
             for r_num, row in enumerate(csvreader):
                 if r_num > 0: # The first row is the header
                     new_entry = TrackingDataSync()
-                        #for seq_type, seq in seq_dict[n]:
-                        #    if seq_type == 'US':
-                        #        new_entry.ultrasound_sequence = seq
-                        #    elif seq_type == 'BV':
-                        #        new_entry.video_sequence = seq
-                        #    else:
-                        #        continue
                     self._populate_sync_trackingdata_entry(new_entry, row)
                     new_entry.subject = subject
                     new_entry.save()
-    """
-    @staticmethod
-    def _populate_trackingdata_entry(tracking_data_obj: TrackingData, data_dict: dict):
-        tracking_data_obj.timestamp = int(data_dict['Timestamp'])
-        tracking_data_obj.branch_number = int(data_dict['Branch number'])
-        tracking_data_obj.position_in_branch = float(data_dict['Position in branch'])
-        tracking_data_obj.branch_length = float(data_dict['Branch length'])
-        tracking_data_obj.branch_generation = int(data_dict['Branch generation'])
-        tracking_data_obj.branch_code = data_dict['Branch code']
-        tracking_data_obj.offset = float(data_dict['Offset [mm]'])
 
-    def import_tracking_file(self, tracking_files: list, subject, image_sequences: list):
-        
-        #Parse a tracking file and populate the table.
-        #Parameters:
-        #    tracking_files: Path to the location of the file with the tracking records
-        #    subject: ID of te Subject entry
-        #    image_sequences: name and ID of the ImageSequence entries
-        
-        seq_dict = self._group_sequences_by_name(image_sequences)
-        for (n, f) in tracking_files:
-            with open(f, 'r') as csvfile:
-                csvreader = csv.DictReader(csvfile, fieldnames=self.TRACKING_FIELDNAMES, delimiter=self.DELIMITER)
-                for r_num, row in enumerate(csvreader):
-                    if r_num > 0:  # The first row is the header
-                        new_entry = TrackingData()
-                        for seq_type, seq in seq_dict[n]:
-                            if seq_type == 'US':
-                                new_entry.ultrasound_sequence = seq
-                            elif seq_type == 'BV':
-                                new_entry.video_sequence = seq
-                            else:
-                                continue
-                        self._populate_trackingdata_entry(new_entry, row)
-                        new_entry.subject = subject
-                        new_entry.save()
-    """
     @staticmethod
     def _group_sequences_by_name(image_sequences: list):
         ret_val = {}
@@ -281,6 +228,11 @@ class CustusPatientImporter(Importer):
         return ret_val
 
     def move_files(self, sequences: List[List[str]], volumetric_images: list, patient_name: str):
+        """
+        Moves files to the expected structure for the ImageSequenceImporter. The sequences are moved to
+        BASE_DIR/imported_data/patient_name/Sequences/sequence_type_sequence_name,
+        while the volumetric images are moved to BASE_DIR/imported_data/patient_name/Images.
+        """
         dest_folder = os.path.join(ROOT_PATH, patient_name)
         os.makedirs(dest_folder, exist_ok=True)
 
@@ -333,6 +285,9 @@ class CustusPatientImporter(Importer):
         return dest_folder, list_sequences, list_images
 
     def parse_custusdoc(self, file_path: str=None):
+        """
+        Parse the custusdoc.xml file to extract patient name, volumetric images, sequences, and tracking files.
+        """
         if file_path is None:
             file_path = os.path.join(self.patient_folder, 'custusdoc.xml')
             patient_folder = self.patient_folder
@@ -361,6 +316,7 @@ class CustusPatientImporter(Importer):
                         image_paths.append((img_path, img_extension))
 
         # Fetch US, video, or other type of sequences
+        timestamp_files = []
         for seq in sequences:
             sequence_type = seq.getElementsByTagName('category')[0].childNodes[0].data
             if sequence_type in self.DICT_SEQUENCE_TYPES.keys():
@@ -384,17 +340,13 @@ class CustusPatientImporter(Importer):
             print(f"tracking file {tracking_files}")
         except FileNotFoundError:
             tracking_files = list()
-        #try:
-        #    timestamp_folder = os.path.join(patient_folder, 'US_Acq/BronchoscopyVideo_1_20250206T150528/') #todo improve! Probably possible to get from custusdoc?
-        #    timestamp_files = [[f.strip("_openCV.fts"), os.path.join(timestamp_folder, f)] for f in os.listdir(timestamp_folder) if f.endswith('_openCV.fts')]
-        #    print(f"timestamp folder {timestamp_folder}")
-        #except FileNotFoundError:
-        #    timestamp_files = list()
-        #    print(f"timestamp -file not found -check folder")
 
         return patient_name, image_paths, list_sequences, tracking_files, timestamp_files
 
     def _is_valid_sequence(self, file_path: str, sequence_name: str, return_extension: bool = False):
+        """
+        Check if the file matches the expected sequence pattern. E.g., US_Acq_sequenceName_0.mhd
+        """
         re_match = re.match(f'{sequence_name}_.+\d+\.(mhd|zraw)$', file_path)
         ret_val = False
         if re_match:
@@ -431,14 +383,15 @@ class CustusPatientImporter(Importer):
         return all_timestamps, all_data
 
     def sync_tracking_data(self, sequences, tracking_files, timestamp_files):
-        #timestamps_mhd = self._read_timestamp_files(timestamp_files)
+        """
+        This function synchronizes the tracking data with the image timestamps.
+        It reads the timestamps from the .fts files and the tracking data from the .txt files.
+        it then finds the closest matching timestamps within a certain range limit. TODO: Do not hardcode range limit
+        If no match is found, it fills in with -1. Finally, it writes the synchronized data to a CSV file.
+        """
+        # Read timestamps from .fts files
         timestamps_mhd, data_mhd = self._read_tracking_files(timestamp_files)
         timestamps_tracking, data_tracking = self._read_tracking_files(tracking_files)
-        #print(f"Timestamps: {timestamps_tracking}")
-        #print(f"Data: {data_tracking}")
-        #print(f"Timestamps mhd: {timestamps_mhd}")
-        #print(f"data mhd {data_mhd}")
-
         # Find exact matches
         exact_matches = set(timestamps_mhd).intersection(timestamps_tracking)
 
@@ -455,11 +408,7 @@ class CustusPatientImporter(Importer):
             if closest_match is not None:
                 close_matches.append((mhd_ts, closest_match))
                 remaining_tracking_timestamps.remove(closest_match)
-        #print(f"exact matcher: {exact_matches}")
-        #print(f"close matches: {close_matches}")
-        #print(f'sequences {sequences}')
-        # print(f"Timestamps mhd: {timestamps_mhd}")
-        # print(f"data mhd {data_mhd}")
+
 
         sync_timestep_file = 'sync_timestamp_file.csv'
         with open(sync_timestep_file, 'w') as f:
@@ -472,7 +421,7 @@ class CustusPatientImporter(Importer):
                                  file_path.endswith('.mhd') and f"_openCV_{i}.mhd" in file_path), None)
 
                 if mhd_file is None:
-                    mhd_file = f"{mhd_prefix}_{i}.mhd"  # Fallback if no match found
+                    mhd_file = f"sequence_{i}.mhd"  # Fallback if no match found
 
                 if timestamp in exact_matches:
                     matching_data = next((line for line in data_tracking if int(line[0]) == timestamp), [-1] * 7)
@@ -489,7 +438,7 @@ class CustusPatientImporter(Importer):
             content = file.read()
             print(content)
 
-        return sync_timestep_file #synched_timestamp_file#exact_matches, close_matches, data_tracking
+        return sync_timestep_file
 
 
 

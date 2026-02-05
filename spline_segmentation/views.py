@@ -50,8 +50,10 @@ def save_segmentation(request):
             # Save control points
             for annotation in annotations:
                 frame_nr = str(annotation.frame_nr)
+                print(type(frame_nr), frame_nr)
                 for object in control_points[frame_nr]:
                     nr_of_control_points = len(control_points[frame_nr][object]['control_points'])
+                    print(control_points)
                     if nr_of_control_points < 3:
                         continue
                     for point in range(nr_of_control_points):

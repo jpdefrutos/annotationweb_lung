@@ -1,13 +1,10 @@
 import json
-from django.views.decorators.csrf import csrf_exempt
 from django.contrib import messages
 from django.http import JsonResponse, HttpResponseRedirect
 from django.shortcuts import render, redirect
-from django.http import Http404
 from django.db import transaction
 
 import common.task
-from .models import *
 from annotationweb.models import Task, ImageAnnotation, KeyFrameAnnotation, Label, TrackingDataSync
 from subsequence_classification.models import FramePrediction
 
@@ -68,14 +65,10 @@ def label_subsequence(request, task_id, image_id):
                 chosen_codes = frame_predictions
                 use_predictions = True
                 print("Using frame predictions")
-                #context["frame_predictions"] = frame_predictions
-                #context["frame_predictions_json"] = json.dumps(frame_predictions)
             elif branch_code:
                 chosen_codes = branch_code
                 use_predictions = False
                 print("Using branch codes")
-                #context["tracking_data_sync"] = branch_code
-                #context["tracking_data_sync_json"] = json.dumps(branch_code)
             else:
                 chosen_codes = {}
                 use_predictions = True
@@ -83,8 +76,6 @@ def label_subsequence(request, task_id, image_id):
 
             context["frame_predictions"] = frame_predictions
             context["frame_predictions_json"] = json.dumps(context["frame_predictions"])
-            #context["tracking_data_sync"] = branch_code
-            #context["tracking_data_sync_json"] = json.dumps(context["branch_code"])
 
             context["branch_codes"] = chosen_codes
             context["branch_codes_json"] = json.dumps(chosen_codes)
@@ -107,47 +98,6 @@ def label_subsequence(request, task_id, image_id):
     except RuntimeError as e:
         messages.error(request, str(e))
         return HttpResponseRedirect(request.META.get('HTTP_REFERER'))
-
-"""
-def save_labels(request):
-    
-    #TODO: From classification/views.py. Adapt to this task
-    
-    response = {}  # initialize response
-    try:
-        rejected = request.POST['rejected'] == 'true'
-        if rejected:
-            annotations = common.task.save_annotation(request)
-            response = {
-                'success': 'true',
-                'message': 'Completed'
-            }
-        else:
-            with transaction.atomic():
-                annotations = common.task.save_annotation(request)
-                frame_labels = json.loads(request.POST['frame_labels'])
-
-                for annotation in annotations:
-                    labeled_image = SubsequenceLabel()
-                    labeled_image.image = annotation
-                    label = Label.objects.get(id=frame_labels[str(annotation.frame_nr)])
-                    labeled_image.label = label
-                    labeled_image.task = annotation.image_annotation.task
-                    labeled_image.save()
-
-            response = {
-                'success': 'true',
-                'message': 'Completed'
-            }
-        messages.success(request, 'Subsequence classification saved')
-    except Exception as e:
-        response = {
-            'success': 'false',
-            'message': str(e)
-        }
-
-    return JsonResponse(response)
-"""
 
 
 def save_labels(request):
