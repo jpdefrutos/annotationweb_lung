@@ -209,19 +209,19 @@ class CustusPatientImporter(Importer):
     def import_sequences(sequences: list, subject: Subject):
         ret_val = list()
         for (sequence_name, sequence_dir, sequence_type) in sequences:
-            frames, _, extension  = ImageSequenceImporter()._parse_sequence_dir(sequence_dir)
+            frames, _, extension  = ImageSequenceImporter._parse_sequence_dir(sequence_dir)
             if len(frames) == 0:
                 continue
 
             filename_format = os.path.join(sequence_dir, f'{sequence_type}_{sequence_name}' + '_#')
             filename_format += extension
 
-            image_sequence, already_imported = ImageSequenceImporter()._import_image_sequence(frames, subject, filename_format)
+            image_sequence, already_imported = ImageSequenceImporter._import_image_sequence(frames, subject, filename_format)
             ret_val.append([sequence_name, sequence_type, image_sequence])
             if already_imported:
                 continue
 
-            _ = ImageSequenceImporter()._import_metadata(sequence_dir, image_sequence)
+            _ = ImageSequenceImporter._import_metadata(sequence_dir, image_sequence)
 
         return ret_val
 
