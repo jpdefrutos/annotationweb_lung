@@ -305,6 +305,7 @@ class CustusPatientImporter(Importer):
                         image_paths.append((img_path, img_extension))
 
         # Fetch US, video, or other type of sequences
+        timestamp_files = list()
         for seq in sequences:
             sequence_type = seq.getElementsByTagName('category')[0].childNodes[0].data
             if sequence_type in self.DICT_SEQUENCE_TYPES.keys():
@@ -331,7 +332,8 @@ class CustusPatientImporter(Importer):
 
         return patient_name, image_paths, list_sequences, tracking_files, timestamp_files
 
-    def _is_valid_sequence(self, file_path: str, sequence_name: str, return_extension: bool = False):
+    @staticmethod
+    def _is_valid_sequence(file_path: str, sequence_name: str, return_extension: bool = False):
         re_match = re.match(f'{sequence_name}_.+\d+\.(mhd|zraw)$', file_path)
         ret_val = False
         if re_match:
@@ -347,7 +349,8 @@ class CustusPatientImporter(Importer):
             ret_val = (ret_val, re_match[1] if re_match else None)
         return ret_val
 
-    def _read_timestamp_files(self, files):
+    @staticmethod
+    def _read_timestamp_files(files):
         content_list = []
         for name, filepath in files:
             with open(filepath, 'r') as file:
@@ -355,7 +358,8 @@ class CustusPatientImporter(Importer):
                 content_list.append((name, content))
         return content_list
 
-    def _read_tracking_files(self, tracking_files):
+    @staticmethod
+    def _read_tracking_files(tracking_files):
         all_timestamps = []
         all_data = []
         for name, filepath in tracking_files:
