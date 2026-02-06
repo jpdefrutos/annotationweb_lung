@@ -98,7 +98,6 @@ class CustusPatientImporter(Importer):
         following the structured expected by the ImageSequenceImporter.
         """
         super().__init__(*args, **kwargs)
-        os.makedirs(ROOT_PATH, exist_ok=True)
 
     def get_form(self, data=None):
         return CustusPatientImporterForm(data)
