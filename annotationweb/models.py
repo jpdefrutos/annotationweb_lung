@@ -183,13 +183,13 @@ class VolumetricImage(models.Model):
 
 
 class TrackingData(models.Model):
-    timestamp = models.PositiveIntegerField()
-    branch_number = models.PositiveIntegerField()
-    position_in_branch = models.FloatField()
-    branch_length = models.FloatField()
-    branch_generation = models.PositiveIntegerField()
+    timestamp = models.PositiveIntegerField(null=True, blank=True)
+    branch_number = models.PositiveIntegerField(null=True, blank=True)
+    position_in_branch = models.FloatField(null=True, blank=True)
+    branch_length = models.FloatField(null=True, blank=True)
+    branch_generation = models.PositiveIntegerField(null=True, blank=True)
     branch_code = models.CharField(max_length=150, validators=[validate_comma_separated_integer_list])
-    offset = models.FloatField()
+    offset = models.FloatField(null=True, blank=True)
     ultrasound_sequence = models.ForeignKey(ImageSequence, on_delete=models.CASCADE, related_name='ultrasound_sequence', blank=True, null=True)
     video_sequence = models.ForeignKey(ImageSequence, on_delete=models.CASCADE, related_name='video_sequence', blank=True, null=True)
     subject = models.ForeignKey(Subject, on_delete=models.CASCADE)
