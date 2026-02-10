@@ -223,7 +223,6 @@ class CustusPatientImporter(Importer):
         Parse a tracking file and populate the table.
         Parameters:
             sync_tracking_data: Path to the location of the file with the tracking records
-            subject: ID of te Subject entry
             image_sequence: ID of the Image sequence entry
 
         """
@@ -473,7 +472,7 @@ class CustusPatientImporter(Importer):
             timestamp_file = next((os.path.join(sequence_folder, f) for f in os.listdir(sequence_folder) if f.endswith('timestamps.csv')), None)
 
             if timestamp_file is None:
-                print(f"Could not find the timestamps file for sequence {sequence.id}, in folder {sequence_folder}")
+                print(f"Could not find the timestamps file for sequence {image_sequence.id}, in folder {sequence_folder}")
                 continue
 
             # Get a list of the timestamps of the tracking data
@@ -485,8 +484,8 @@ class CustusPatientImporter(Importer):
             exact_matches = set(timestamps_mhd).intersection(timestamps_tracking)
 
             # Remove exact matches from the lists
-            remaining_mhd_timestamps = set(timestamps_mhd).difference(exact_matches)  # [ts for ts in timestamps_mhd if ts not in exact_matches]
-            remaining_tracking_timestamps = set(timestamps_tracking).difference(exact_matches) # [ts for ts in timestamps_tracking if ts not in exact_matches]
+            remaining_mhd_timestamps = [ts for ts in timestamps_mhd if ts not in exact_matches]
+            remaining_tracking_timestamps = [ts for ts in timestamps_tracking if ts not in exact_matches]
 
             # Find the closest matches within the range limit
             close_matches = []
@@ -501,7 +500,7 @@ class CustusPatientImporter(Importer):
             sync_timestep_file = os.path.join(self.processed_data_folder, f'sync_timestamp_file_{sequence_name}.csv')
             with open(sync_timestep_file, 'w') as f:
                 f.write(
-                    "Filename; Timestamp from FTS; Matching Timestamp from TXT; Branch number; Position in branch; Branch length; Branch generation; branchCode; Offset [mm]\n")
+                    "Filename; Timestamp from FTS; Matching Timestamp from TXT; \n")
 
                 for i, (mhd_ts, mhd_filename) in enumerate(zip(timestamps_mhd, frames_mhd)):
                     mhd_file = os.path.join(sequence_folder, mhd_filename)
@@ -509,14 +508,13 @@ class CustusPatientImporter(Importer):
                     if os.path.exists(mhd_file):
                         if mhd_ts in exact_matches:
                             matching_data = next((tts for tts in timestamps_tracking if tts == mhd_ts), [-1] * 7)
-                            f.write(f"{mhd_file}; {mhd_ts}; {mhd_ts}; {'; '.join(matching_data[1:])}\n")
+                            f.write(f"{mhd_file}; {mhd_ts}; {mhd_ts}; \n")
                         else:
                             close_match = next((match[1] for match in close_matches if match[0] == mhd_ts), None)
                             if close_match:
-                                matching_data = next((tts for tts in timestamps_tracking if tts == close_match), [-1] * 7)
-                                f.write(f"{mhd_file}; {mhd_ts}; {close_match}; {'; '.join(matching_data[1:])}\n")
+                                f.write(f"{mhd_file}; {mhd_ts}; {close_match}; \n")
                             else:
-                                f.write(f"{mhd_file}; {mhd_ts};-1;-1;-1;-1;-1;-1;-1\n")
+                                f.write(f"{mhd_file}; {mhd_ts};-1;\n")
                     else:
                         raise FileNotFoundError("Failed to retrieve the MHD sequence files")
             sync_ts_files.append((sync_timestep_file, image_sequence))
@@ -524,7 +522,6 @@ class CustusPatientImporter(Importer):
                 content = file.read()
                 print(content)
 
-        return sync_timestep_file #synched_timestamp_file#exact_matches, close_matches, data_tracking
         return sync_ts_files
 
 
