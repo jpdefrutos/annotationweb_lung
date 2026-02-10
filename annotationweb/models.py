@@ -183,6 +183,14 @@ class VolumetricImage(models.Model):
 
 
 class TrackingData(models.Model):
+    VIDEO_TYPE = 'BV'
+    ULTRASOUND_TYPE = 'US'
+    IMAGE_SEQUENCE_CHOICES = (
+        (VIDEO_TYPE, 'Video'),
+        (ULTRASOUND_TYPE, 'Ultrasound'),
+    )
+    SUPPORTED_SEQUENCE_TYPES = [VIDEO_TYPE, ULTRASOUND_TYPE]
+
     timestamp = models.PositiveIntegerField(null=True, blank=True)
     branch_number = models.PositiveIntegerField(null=True, blank=True)
     position_in_branch = models.FloatField(null=True, blank=True)
@@ -190,42 +198,21 @@ class TrackingData(models.Model):
     branch_generation = models.PositiveIntegerField(null=True, blank=True)
     branch_code = models.CharField(max_length=150, validators=[validate_comma_separated_integer_list])
     offset = models.FloatField(null=True, blank=True)
-    ultrasound_sequence = models.ForeignKey(ImageSequence, on_delete=models.CASCADE, related_name='ultrasound_sequence', blank=True, null=True)
-    video_sequence = models.ForeignKey(ImageSequence, on_delete=models.CASCADE, related_name='video_sequence', blank=True, null=True)
+    image_sequence = models.ManyToManyField(ImageSequence, blank=True)
     subject = models.ForeignKey(Subject, on_delete=models.CASCADE)
 
     def clean(self, *args, **kwargs):
         super().clean(*args, **kwargs)
-        return self.ultrasound_sequence != self.video_sequence
+        return True
 
     def save(self, *args, **kwargs):
         self.full_clean()
         super().save(*args, **kwargs)
 
 
-class TrackingDataSync(models.Model):
-
+class SynchronisedTrackingData(models.Model):
+    tracking_data = models.ForeignKey(TrackingData, on_delete=models.CASCADE, blank=True, null=True)
     filename = models.CharField(max_length=200)
-    timestamp_from_fts = models.PositiveIntegerField(null=True, blank=True)
-    matching_timestamp_from_txt = models.FloatField(null=True, blank=True)# PositiveIntegerField()
-    branch_number = models.FloatField(null=True, blank=True)
-    position_in_branch = models.FloatField(null=True, blank=True)
-    branch_length = models.FloatField(null=True, blank=True)
-    branch_generation = models.FloatField(null=True, blank=True)
-    #branch_code = models.CharField(max_length=150, validators=[validate_comma_separated_integer_list], null=True, blank=True)
-    branch_code = models.CharField(max_length=150, null=True, blank=True)
-    offset = models.FloatField(null=True, blank=True)
-    #ultrasound_sequence = models.ForeignKey(ImageSequence, on_delete=models.CASCADE, related_name='ultrasound_sequence',
-    #                                        blank=True, null=True)
-    #video_sequence = models.ForeignKey(ImageSequence, on_delete=models.CASCADE, related_name='video_sequence',
-    #                                   blank=True, null=True)
-
-    subject = models.ForeignKey(Subject, on_delete=models.CASCADE)
-
-    #def clean(self, *args, **kwargs):
-    #    super().clean(*args, **kwargs)
-    #    return self.ultrasound_sequence != self.video_sequence
-
-    def save(self, *args, **kwargs):
-        self.full_clean()
-        super().save(*args, **kwargs)
+    image_sequence_timestamp = models.FloatField(null=True, blank=True)
+    tracking_system_timestamp = models.FloatField(null=True, blank=True)# PositiveIntegerField()
+    timestamp_difference = models.FloatField(null=True, blank=True)

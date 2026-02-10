@@ -8,11 +8,12 @@ from django.db import transaction
 
 import common.task
 from .models import *
-from annotationweb.models import Task, ImageAnnotation, KeyFrameAnnotation, Label, TrackingDataSync
+from annotationweb.models import Task, ImageAnnotation, KeyFrameAnnotation, Label, SynchronisedTrackingData, \
+    TrackingData
 from subsequence_classification.models import FramePrediction
 
 from .models import SubsequenceLabel
-from annotationweb.models import TrackingDataSync
+from annotationweb.models import SynchronisedTrackingData
 from django.apps import apps
 
 def label_next_image(request, task_id):
@@ -55,7 +56,8 @@ def label_subsequence(request, task_id, image_id):
             frame_predictions = {fp.frame_nr: fp.predicted_class_info for fp in frame_predictions_qs}
 
             # Load tracking data sync if available (obs! (td.id -1) corresponds to frame_nr)
-            tracking_data = TrackingDataSync.objects.filter(subject=sequence.subject).order_by("id")
+            tracking_data = TrackingData.objects.filter(subject_id__in=sequence.subject,
+                                                        synchronisedtrackingdata__isnull=False).order_by("id")
             branch_code = {td.id -1: td.branch_code for td in tracking_data}
 
 
@@ -107,47 +109,6 @@ def label_subsequence(request, task_id, image_id):
     except RuntimeError as e:
         messages.error(request, str(e))
         return HttpResponseRedirect(request.META.get('HTTP_REFERER'))
-
-"""
-def save_labels(request):
-    
-    #TODO: From classification/views.py. Adapt to this task
-    
-    response = {}  # initialize response
-    try:
-        rejected = request.POST['rejected'] == 'true'
-        if rejected:
-            annotations = common.task.save_annotation(request)
-            response = {
-                'success': 'true',
-                'message': 'Completed'
-            }
-        else:
-            with transaction.atomic():
-                annotations = common.task.save_annotation(request)
-                frame_labels = json.loads(request.POST['frame_labels'])
-
-                for annotation in annotations:
-                    labeled_image = SubsequenceLabel()
-                    labeled_image.image = annotation
-                    label = Label.objects.get(id=frame_labels[str(annotation.frame_nr)])
-                    labeled_image.label = label
-                    labeled_image.task = annotation.image_annotation.task
-                    labeled_image.save()
-
-            response = {
-                'success': 'true',
-                'message': 'Completed'
-            }
-        messages.success(request, 'Subsequence classification saved')
-    except Exception as e:
-        response = {
-            'success': 'false',
-            'message': str(e)
-        }
-
-    return JsonResponse(response)
-"""
 
 
 def save_labels(request):
