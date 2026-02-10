@@ -172,28 +172,6 @@ class CustusPatientImporter(Importer):
                 self.import_synchronised_tracking_file(sync_file, img_seq)
         return True, self.processed_data_folder
 
-    @staticmethod
-    def _populate_new_entry(new_entry: Union[TrackingData, SynchronisedTrackingData], data_dict: dict):
-        """
-        Initialize a new entry
-        Parameters:
-            new_entry:
-            data_dict: values to populate new_entry with. For SynchronisedTrackingData it is expected to contain the id of the entry in TrackingData table.
-        """
-        if isinstance(new_entry, TrackingData):
-            new_entry.timestamp = int(data_dict['Timestamp'])
-            new_entry.branch_number = int(data_dict['Branch number']) if data_dict['Branch number'] != -1 else -1 #this should be int is float in table
-            new_entry.position_in_branch = int(data_dict['Position in branch']) if data_dict['Position in branch'] != -1 else -1
-            new_entry.branch_length = float(data_dict['Branch length']) if data_dict['Branch length'] != -1 else -1
-            new_entry.branch_generation = int(data_dict['Branch generation']) if data_dict['Branch generation'] != -1 else -1
-            new_entry.branch_code = data_dict['Branch code'] if data_dict['Branch code'] != -1 else -1
-            new_entry.offset = float(data_dict['Offset [mm]']) if data_dict['Offset [mm]'] != -1 else -1
-        elif isinstance(new_entry, SynchronisedTrackingData):
-            new_entry.image_sequence = data_dict['Image sequence id']
-            new_entry.filename = str(data_dict['Filename'])
-            new_entry.image_sequence_timestamp = int(data_dict['Timestamp from FTS'])
-            new_entry.tracking_system_timestamp = int(data_dict['Matching Timestamp from TXT']) if data_dict['Matching Timestamp from TXT'] != -1 else -1 #change to -1
-
     def import_tracking_file(self, tracking_file: str, subject, image_sequences: List[ImageSequence]):
         """
         Parse a tracking file and populate the table.
@@ -210,11 +188,20 @@ class CustusPatientImporter(Importer):
 
             for r_num, row in tqdm(enumerate(csvreader)):
                 if r_num > 0: # The first row is the header
-                    new_trackingdata_entry = TrackingData()
-                    self._populate_new_entry(new_trackingdata_entry, row)
-                    new_trackingdata_entry.subject = subject
-                    new_trackingdata_entry.save()
-                    new_trackingdata_entry.image_sequence.add(*image_sequences)
+                    new_trackingdata_entry, created = TrackingData.objects.update_or_create(
+                        timestamp=int(row['Timestamp']),
+                        branch_number=int(row['Branch number']) if row['Branch number'] != -1 else -1,
+                        position_in_branch=int(row['Position in branch']) if row['Position in branch'] != -1 else -1,
+                        branch_length=float(row['Branch length']) if row['Branch length'] != -1 else -1,
+                        branch_generation=int(row['Branch generation']) if row['Branch generation'] != -1 else -1,
+                        branch_code=row['Branch code'] if row['Branch code'] != -1 else -1,
+                        offset=float(row['Offset [mm]']) if row['Offset [mm]'] != -1 else -1,
+                        subject=subject,
+                    )
+                    if created:
+                        print("New entry!")
+                        new_trackingdata_entry.save()
+                        new_trackingdata_entry.image_sequence.add(*image_sequences)
                     new_entries.append(new_trackingdata_entry)
         return new_entries
 
