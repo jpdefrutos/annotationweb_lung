@@ -56,7 +56,7 @@ def label_subsequence(request, task_id, image_id):
             frame_predictions = {fp.frame_nr: fp.predicted_class_info for fp in frame_predictions_qs}
 
             # Load tracking data sync if available (obs! (td.id -1) corresponds to frame_nr)
-            tracking_data = TrackingData.objects.filter(subject_id__in=sequence.subject,
+            tracking_data = TrackingData.objects.filter(subject_id=sequence.subject,
                                                         synchronisedtrackingdata__isnull=False).order_by("id")
             branch_code = {td.id -1: td.branch_code for td in tracking_data}
 
