@@ -86,12 +86,7 @@ class CustusPatientImporter(Importer):
     SYNCHRONISED_TRACKING_FIELDNAMES = ['Filename',
                            'Timestamp from FTS',
                            'Matching Timestamp from TXT',
-                           'Branch number',
-                           'Position in branch',
-                           'Branch length',
-                           'Branch generation',
-                           'Branch code',
-                           'Offset [mm]']
+                           'Tracking ID']
     IMPORTED_TIMESTAMP_FIELDNAMES = ['Timestamp', 'FrameFile']
     TIMESTAMP_FIELDNAMES = ['FrameFile']
     patient_folder = None
@@ -168,8 +163,8 @@ class CustusPatientImporter(Importer):
             print("Synchronising tracking information with image sequences...")
             sync_tracking_data = self.synchronise_tracking_data(imported_sequences)
             # print(sync_tracking_data)
-            for (sync_file, img_seq) in sync_tracking_data:
-                self.import_synchronised_tracking_file(sync_file, img_seq)
+            for sync_file in sync_tracking_data:
+                self.import_synchronised_tracking_file(sync_file)
         return True, self.processed_data_folder
 
     def import_tracking_file(self, tracking_file: str, subject, image_sequences: List[ImageSequence]):
@@ -204,12 +199,12 @@ class CustusPatientImporter(Importer):
                     new_entries.append(new_trackingdata_entry)
         return new_entries
 
-    def import_synchronised_tracking_file(self, sync_tracking_data, image_sequence: ImageSequence):
+    def import_synchronised_tracking_file(self, sync_tracking_data):
         """
         Parse a tracking file and populate the table.
         Parameters:
             sync_tracking_data: Path to the location of the file with the tracking records
-            image_sequence: ID of the Image sequence entry
+            tracking_data: ID of the Image sequence entry
 
         """
         with open(sync_tracking_data, 'r') as csvfile:
@@ -217,9 +212,10 @@ class CustusPatientImporter(Importer):
             for r_num, row in enumerate(csvreader):
                 if r_num > 0: # The first row is the header
                     new_entry = SynchronisedTrackingData()
-                    new_entry.image_sequence = image_sequence
                     new_entry.filename = row['Filename']
                     new_entry.image_sequence_timestamp = int(row['Timestamp from FTS'])
+                    new_entry.tracking_system_timestamp = int(row['Matching Timestamp from TXT'])
+                    new_entry.tracking_data = TrackingData.objects.get(id=int(row['Tracking ID'])) if int(row['Tracking ID']) != -1 else None
                     new_entry.save()
 
     @staticmethod
@@ -485,25 +481,23 @@ class CustusPatientImporter(Importer):
 
             sync_timestep_file = os.path.join(self.processed_data_folder, f'sync_timestamp_file_{sequence_name}.csv')
             with open(sync_timestep_file, 'w') as f:
-                f.write(
-                    "Filename; Timestamp from FTS; Matching Timestamp from TXT; \n")
+                f.write(f'{";".join(self.SYNCHRONISED_TRACKING_FIELDNAMES)}\n')
 
                 for i, (mhd_ts, mhd_filename) in enumerate(zip(timestamps_mhd, frames_mhd)):
                     mhd_file = os.path.join(sequence_folder, mhd_filename)
 
                     if os.path.exists(mhd_file):
                         if mhd_ts in exact_matches:
-                            matching_data = next((tts for tts in timestamps_tracking if tts == mhd_ts), [-1] * 7)
-                            f.write(f"{mhd_file}; {mhd_ts}; {mhd_ts}; \n")
+                            f.write(f"{mhd_file}; {mhd_ts}; {mhd_ts}; {trackingdata.get(timestamp=mhd_ts).id}\n")
                         else:
                             close_match = next((match[1] for match in close_matches if match[0] == mhd_ts), None)
                             if close_match:
-                                f.write(f"{mhd_file}; {mhd_ts}; {close_match}; \n")
+                                f.write(f"{mhd_file}; {mhd_ts}; {close_match}; {trackingdata.get(timestamp=close_match).id}\n")
                             else:
-                                f.write(f"{mhd_file}; {mhd_ts};-1;\n")
+                                f.write(f"{mhd_file}; {mhd_ts};-1; -1;\n")
                     else:
                         raise FileNotFoundError("Failed to retrieve the MHD sequence files")
-            sync_ts_files.append((sync_timestep_file, image_sequence))
+            sync_ts_files.append(sync_timestep_file)
             with open(sync_timestep_file, 'r') as file:
                 content = file.read()
                 print(content)
