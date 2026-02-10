@@ -215,4 +215,3 @@ class SynchronisedTrackingData(models.Model):
     filename = models.CharField(max_length=200)
     image_sequence_timestamp = models.FloatField(null=True, blank=True)
     tracking_system_timestamp = models.FloatField(null=True, blank=True)# PositiveIntegerField()
-    timestamp_difference = models.FloatField(null=True, blank=True)
