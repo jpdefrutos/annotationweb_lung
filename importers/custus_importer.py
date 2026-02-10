@@ -180,7 +180,6 @@ class CustusPatientImporter(Importer):
             subject: ID of te Subject entry
             image_sequences: Information on the imported image sequences linked to the tracking file
         """
-        # TODO Check for duplicates
         new_entries = list()
 
         with open(tracking_file, 'r') as csvfile:
