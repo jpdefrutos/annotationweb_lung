@@ -446,6 +446,9 @@ function updateFrameLabelVariables() {
                 window.branchCodes[g_currentFrameNr] !== undefined) {
                 value = window.branchCodes[g_currentFrameNr];
                 label = 'Branch code: ';
+            } else if (window.branchCodes) {
+                value = 'Undefined';
+                label = 'Branch code: ';
             }
         }
         predictedClassElem.textContent = value;
