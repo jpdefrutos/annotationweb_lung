@@ -293,7 +293,7 @@ class CustusPatientImporter(Importer):
                 for (f, ts) in zip(mhd_files, sequence_ts):
                     old_filename, ext = os.path.split(f)[-1].split('.')
                     i = int(old_filename.split('_')[-1])
-                    out_filename = f'{sequence_type}_{sequence_name}_{i:02d}.{ext}'
+                    out_filename = f'{sequence_type}_{sequence_name}_{i:d}.{ext}'
                     out_filepath = os.path.join(r_dest_folder, out_filename)
                     if not os.path.exists(out_filepath):
                         sitk_reader.SetFileName(f)
