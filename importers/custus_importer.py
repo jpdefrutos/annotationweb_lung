@@ -361,7 +361,7 @@ class CustusPatientImporter(Importer):
         if self.import_vol_images:
             for i in images:
                 if i.getAttribute('type') in ('mesh', 'image'):
-                    img_path = os.path.join(patient_folder, i.getElementsByTagName('filePath')[0].childNodes[0].data).replace('/', '\\')
+                    img_path = os.path.join(patient_folder, i.getElementsByTagName('filePath')[0].childNodes[0].data).replace('/', os.sep)
                     is_valid, img_extension = self._is_valid_file(img_path, True)
                     if is_valid:
                         image_paths.append((img_path, img_extension))
