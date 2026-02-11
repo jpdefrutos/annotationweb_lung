@@ -211,11 +211,13 @@ class CustusPatientImporter(Importer):
             csvreader = csv.DictReader(csvfile, fieldnames=self.SYNCHRONISED_TRACKING_FIELDNAMES, delimiter=self.DELIMITER)
             for r_num, row in enumerate(csvreader):
                 if r_num > 0: # The first row is the header
-                    new_entry = SynchronisedTrackingData()
-                    new_entry.filename = row['Filename']
-                    new_entry.image_sequence_timestamp = int(row['Timestamp from FTS'])
-                    new_entry.tracking_system_timestamp = int(row['Matching Timestamp from TXT'])
-                    new_entry.tracking_data = TrackingData.objects.get(id=int(row['Tracking ID'])) if int(row['Tracking ID']) != -1 else None
+                    new_entry, created = SynchronisedTrackingData.objects.update_or_create(
+                        filename=row['Filename'],
+                        image_sequence_timestamp=int(row['Timestamp from FTS']),
+                        tracking_system_timestamp=int(row['Matching Timestamp from TXT']),
+                        tracking_data=TrackingData.objects.get(id=int(row['Tracking ID'])) if int(
+                            row['Tracking ID']) != -1 else None
+                    )
                     new_entry.save()
 
     @staticmethod
