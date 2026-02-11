@@ -9,3 +9,4 @@ six==1.15.0
 sqlparse==0.4.1
 SimpleITK==2.2.0
 tqdm
+scikit-learn
