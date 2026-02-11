@@ -193,7 +193,6 @@ class CustusPatientImporter(Importer):
                         subject=subject,
                     )
                     if created:
-                        print("New entry!")
                         new_trackingdata_entry.save()
                         new_trackingdata_entry.image_sequence.add(*image_sequences)
                     new_entries.append(new_trackingdata_entry)
