@@ -211,14 +211,14 @@ class CustusPatientImporter(Importer):
             csvreader = csv.DictReader(csvfile, fieldnames=self.SYNCHRONISED_TRACKING_FIELDNAMES, delimiter=self.DELIMITER)
             for r_num, row in enumerate(csvreader):
                 if r_num > 0: # The first row is the header
-                    new_entry, created = SynchronisedTrackingData.objects.update_or_create(
+                    new_synchtrackdata_entry, created = SynchronisedTrackingData.objects.update_or_create(
                         filename=row['Filename'],
                         image_sequence_timestamp=int(row['Timestamp from FTS']),
                         tracking_system_timestamp=int(row['Matching Timestamp from TXT']),
                         tracking_data=TrackingData.objects.get(id=int(row['Tracking ID'])) if int(
                             row['Tracking ID']) != -1 else None
                     )
-                    new_entry.save()
+                    new_synchtrackdata_entry.save()
 
     @staticmethod
     def _read_fts_file_failproof(fts_path: str, expected_number_of_entries: int = 0):
@@ -245,14 +245,12 @@ class CustusPatientImporter(Importer):
     def import_volumetric_image(images_paths: list, subject: Subject):
         ret_val = list()
         for f in images_paths:
-            try:
-                new_entry = VolumetricImage.objects.get(subject=subject, format=f)
-            except VolumetricImage.DoesNotExist:
-                new_entry = VolumetricImage()
-                new_entry.format = f
-                new_entry.subject = subject
-            new_entry.save()
-            ret_val.append(new_entry)
+            new_volimg_entry, created = VolumetricImage.objects.update_or_create(
+                format=f,
+                subject=subject
+            )
+            new_volimg_entry.save()
+            ret_val.append(new_volimg_entry)
         return ret_val
 
     @staticmethod
