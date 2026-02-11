@@ -2,9 +2,6 @@ let g_backgroundImage;
 let g_frameNr;
 let g_currentColor = null;
 let g_labels = {}; // Dictionary with keys frame_nr which each has a label
-let g_currentFrameLabelId = -1;
-let g_currentFrameLabel = null;
-let g_currentFrameLabelColor = '#3d6ad8';
 
 let g_selectedLabels = [];
 let g_subsequenceStartFrame = null; // Start frame of subsequence
@@ -54,22 +51,6 @@ function loadSubsequenceClassificationTask() {
     endSubsequence.onclick = endButtonClick;
 }
 
-
-
-/*
-function sendDataForSave(frameId, labelIds) {
-    return $.ajax({
-        type: "POST",
-        url: "/subsequence-classification/save/",
-        contentType: "application/json",
-        data: JSON.stringify({
-            frame_id: frameId,
-            label_ids: labelIds
-        }),
-        dataType: "json"
-    });
-}
-*/
 // Function to send data for saving
 function sendDataForSave() {
     return $.ajax({
@@ -155,8 +136,6 @@ function startButtonClick(e) {
     alert('Configuration error: no valid subsequence mode detected.');
 }
 
-
-//
 function endButtonClick(e) {
     // 1) Textbox\-only mode
     if (isTextboxOnlyMode()) {
@@ -234,47 +213,6 @@ function endButtonClick(e) {
     alert('Configuration error: no valid subsequence mode detected.');
 }
 
-
-
-/*
-// Old endButtonClick function, kept for reference
-function endButtonClick(e) {
-    if (!Array.isArray(g_selectedLabels) || g_selectedLabels.length === 0) {
-        alert('You need to select at least one label before ending a subsequence!');
-        return;
-    }
-
-    if (jQuery.isEmptyObject(g_labels)) {
-        alert('You need to start a subsequence before ending it!');
-        return;
-    }
-
-    console.log('Subsequence ended on frame', g_currentFrameNr, 'with labels:', g_selectedLabels);
-
-    // Find start of subsequence with same labels
-    let startOfSubsequence = g_currentFrameNr;
-    for (let i = g_currentFrameNr; i >= g_startFrame; i--) {
-        // Compare arrays by stringifying (simple approach)
-        if (JSON.stringify(g_labels[i]) === JSON.stringify(g_selectedLabels)) {
-            startOfSubsequence = i;
-        } else {
-            break;
-        }
-    }
-
-    let lastFrame = g_startFrame + g_sequenceLength;
-    for (let frameIdx = startOfSubsequence; frameIdx <= Math.min(g_currentFrameNr, lastFrame); frameIdx++) {
-        addKeyFrame(frameIdx);
-        setLabel(frameIdx, g_selectedLabels);
-        updateFrameLabelVariables();
-    }
-
-    // Add one mark for entire subsequence
-    sliderMarkSubsequence(startOfSubsequence, Math.min(g_currentFrameNr, lastFrame), getLabelWithId(g_selectedLabels[0]));
-
-    updateFrameLabelVariables();
-}
-*/
 
 function setupSubsequenceClassification() {
     console.log('Setting up subsequence classification....');
@@ -362,14 +300,6 @@ function setLabel(frame_nr, label_ids) {
     setupSliderMark(frame_nr, hexColor);
 }
 
-
-/* original addSubsequenceLabel function, kept for reference
-function addSubsequenceLabel(frame_nr, label_id) {
-    addKeyFrame(frame_nr);
-    setLabel(frame_nr, label_id);
-}
-*/
-
 function addSubsequenceLabel(frame_nr, label_id) {
     addKeyFrame(frame_nr);
     // Ensure g_labels[frame_nr] is an array
@@ -456,51 +386,9 @@ function updateFrameLabelVariables() {
         predictedClassElem.parentElement.style.display = label ? 'block' : 'none';
     }
 
-
-
-    //if (window.framePredictions && window.framePredictions[g_currentFrameNr] !== undefined) {
-    //    predictedClassElem.textContent = window.framePredictions[g_currentFrameNr];
-    //    predictedClassHeader.style.display = 'block'; // show <h3> if prediction exists
-    //} else {
-    //    predictedClassElem.textContent = '';
-    //    predictedClassHeader.style.display = 'none'; // hide <h3> if no prediction
-    //    predictedClassElem.textContent = 'Prediction not found';
-    //}
-    //predictedClassHeader.style.display = 'block'; // always show <h3>
-    //console.log('Predicted class info:', predictedClass);
     console.log('Predicted class info:', window.framePredictions[g_currentFrameNr]);
 }
 
-
-
-/*
-function updateFrameLabelVariables() {
-    const labelIds = g_labels[g_currentFrameNr] || [];
-    g_currentFrameLabel = getLabelWithId(g_currentFrameLabelId);
-
-    // If current frame is labelled, display label name
-    if (g_currentFrameLabel) {
-        $('#currentFrameLabel').text(g_currentFrameLabel.name);
-        //$('#currentFrameLabel').innerHTML = '<span style="color: ' + g_currentFrameLabelColor + '">' + getLabelWithId(g_currentFrameLabelId).name + '</span>';;
-        $('#currentFrameLabelDisplay').text(g_currentFrameLabel.name);
-    } else {
-        $('#currentFrameLabel').text('No label');
-        $('#currentFrameLabelDisplay').text('No label');
-    }
-
-    // --- Update predicted class ---
-    const predictedClassElem = document.getElementById('predicted-class-info');
-    const predictedClassHeader = predictedClassElem.parentElement; // the <h3> that contains the span
-
-    if (window.framePredictions && window.framePredictions[g_currentFrameNr] !== undefined) {
-        predictedClassElem.textContent = window.framePredictions[g_currentFrameNr];
-        predictedClassHeader.style.display = 'block'; // show <h3> if prediction exists
-    } else {
-        predictedClassElem.textContent = '';
-        predictedClassHeader.style.display = 'none'; // hide <h3> if no prediction
-    }
-}
-*/
 
 function dictDelete(dict, key) {
     if (dict.hasOwnProperty(key)) {

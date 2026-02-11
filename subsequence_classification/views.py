@@ -8,13 +8,8 @@ from django.db import transaction
 
 import common.task
 from .models import *
-from annotationweb.models import Task, ImageAnnotation, KeyFrameAnnotation, Label, SynchronisedTrackingData, \
-    TrackingData
-from subsequence_classification.models import FramePrediction
+from annotationweb.models import Task, ImageAnnotation, KeyFrameAnnotation, Label, TrackingData
 
-from .models import SubsequenceLabel
-from annotationweb.models import SynchronisedTrackingData
-from django.apps import apps
 
 def label_next_image(request, task_id):
     return label_subsequence(request, task_id, None)
