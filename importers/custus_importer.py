@@ -134,8 +134,9 @@ class CustusPatientImporter(Importer):
         patient_name, images, sequences, tracking_files, timestamp_files = self.parse_custusdoc()
 
         print("Moving files...")
-        sequences_paths, images_paths = self.move_files(sequences,
-                                                        images)
+        sequences_paths, images_paths, tracking_files = self.move_files(sequences,
+                                                        images,
+                                                        tracking_files)
 
         try:
             subject = Subject.objects.get(name=patient_name, dataset=self.dataset)
@@ -272,7 +273,7 @@ class CustusPatientImporter(Importer):
 
         return ret_val
 
-    def move_files(self, sequences: List[List[str]], volumetric_images: list):
+    def move_files(self, sequences: List[List[str]], volumetric_images: list, tracking_data_files: List[str] = None):
         os.makedirs(self.processed_data_folder, exist_ok=True)
 
         # Move sequences
@@ -328,7 +329,15 @@ class CustusPatientImporter(Importer):
             else:
                 warnings.warn(f'File not found: {f}')
 
-        return list_sequences, list_images
+        # Move tracking data file
+        dest_tracking_data_files = []
+        if tracking_data_files is not None:
+            for i, f in enumerate(tracking_data_files):
+                dest = os.path.join(self.processed_data_folder, f'TrackingData_{i:03d}.txt')
+                copy2(f, dest)
+                dest_tracking_data_files.append(dest)
+
+        return list_sequences, list_images, dest_tracking_data_files
 
     def parse_custusdoc(self, file_path: str=None):
         if file_path is None:
