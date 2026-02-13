@@ -286,6 +286,7 @@ class CustusPatientImporter(Importer):
             r_dest_folder = os.path.join(sequences_folder, f'{sequence_type}_{sequence_name}')
             os.makedirs(r_dest_folder, exist_ok=True)
             mhd_files = [f for f in sequence_files if f.endswith('mhd')]
+            mhd_files.sort(key=lambda name: int(re.findall(r'.*_(\d+)\.mhd', name)[0]))
             sequence_ts = self._read_fts_file_failproof(fts_filename, len(mhd_files))
 
             new_fts_file = os.path.join(r_dest_folder, f'{sequence_type}_{sequence_name}_timestamps.csv')
@@ -376,7 +377,7 @@ class CustusPatientImporter(Importer):
                 sequence_files = [os.path.join(sequence_folder, f) for f in os.listdir(sequence_folder) if self._is_valid_sequence(f, f'{sequence_type}_{sequence_name.lstrip("0")}'.replace('_', '\_'))]
                 sequence_ts_file = [os.path.join(sequence_folder, f) for f in os.listdir(sequence_folder) if f.endswith('_openCV.fts')]
                 sequence_ts_file = sequence_ts_file[0] if len(sequence_ts_file) > 0 else None
-                sequence_files.sort()
+                sequence_files.sort(key=lambda name: int(re.findall(r'.*_(\d+)\.[mhd|zraw]', name)[0]))
                 list_sequences.append([sequence_name,
                                        sequence_files,
                                        self.DICT_SEQUENCE_TYPES[sequence_type],
@@ -487,7 +488,7 @@ class CustusPatientImporter(Importer):
                     close_matches.append((mhd_ts, closest_match))
                     remaining_tracking_timestamps.remove(closest_match)
 
-            sync_timestep_file = os.path.join(self.processed_data_folder, f'sync_timestamp_file_{sequence_name}.csv')
+            sync_timestep_file = os.path.join(self.processed_data_folder, 'Sequences', f'sync_timestamp_file_{sequence_name}.csv')
             with open(sync_timestep_file, 'w') as f:
                 f.write(f'{";".join(self.SYNCHRONISED_TRACKING_FIELDNAMES)}\n')
 
@@ -506,9 +507,6 @@ class CustusPatientImporter(Importer):
                     else:
                         raise FileNotFoundError("Failed to retrieve the MHD sequence files")
             sync_ts_files.append(sync_timestep_file)
-            with open(sync_timestep_file, 'r') as file:
-                content = file.read()
-                print(content)
 
         return sync_ts_files
 
