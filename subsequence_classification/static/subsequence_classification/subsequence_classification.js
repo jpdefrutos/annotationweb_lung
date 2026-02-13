@@ -351,8 +351,8 @@ function updateFrameLabelVariables() {
 
     // --- Update predicted class or branch code ---
     console.log('Current frame:', g_currentFrameNr);
-    console.log('Branch codes:', window.branchCodes);
-    console.log('Frame predictions:', window.framePredictions);
+    console.log('Branch codes:', window.branchCodes[g_currentFrameNr]);
+    console.log('Frame predictions:', window.framePredictions[g_currentFrameNr]);
     const predictedClassElem = document.getElementById('predicted-class-info');
     //const predictedClassHeader = predictedClassElem.parentElement; // the <h3> that contains the span
     const predictedClassHeader = predictedClassElem ? predictedClassElem.parentElement : undefined;
