@@ -94,7 +94,8 @@ def get_available_importers(dataset):
     Returns a list of available importer instances for the given dataset.
     """
     available_importers = []
-    for importer_cls in find_all_importers():
+    all_importers = find_all_importers()
+    for importer_cls in all_importers:
         importer = importer_cls()
         importer.dataset = dataset
         if importer.is_available():

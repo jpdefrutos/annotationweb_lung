@@ -82,7 +82,8 @@ class ImageSequenceImporter(Importer):
 
         return True, path
 
-    def _parse_sequence_dir(self, image_sequence_dir):
+    @staticmethod
+    def _parse_sequence_dir(image_sequence_dir):
         # Count nr of frames
         # Handle only monotype sequence: .mhd or .png or .jpg
         name = None
@@ -115,7 +116,8 @@ class ImageSequenceImporter(Importer):
                     raise Exception('Found both jpg and mhd/png images in the same folder.')
         return frames, name, extension
 
-    def _import_image_sequence(self, frames, subject, filename_format):
+    @staticmethod
+    def _import_image_sequence(frames, subject, filename_format):
         sequence_already_imported = False
         try:
             # Check to see if sequence exist
@@ -141,7 +143,8 @@ class ImageSequenceImporter(Importer):
             image_sequence.save()
         return image_sequence, sequence_already_imported
 
-    def _import_metadata(self, image_sequence_dir, image_sequence):
+    @staticmethod
+    def _import_metadata(image_sequence_dir, image_sequence):
         metadata = None
         metadata_filename = join(image_sequence_dir, 'metadata.txt')
         if os.path.exists(metadata_filename):
