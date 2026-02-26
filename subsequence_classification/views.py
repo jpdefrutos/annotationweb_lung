@@ -12,6 +12,7 @@ from annotationweb.models import Task, ImageAnnotation, KeyFrameAnnotation, Labe
 
 
 def label_next_image(request, task_id):
+
     return label_subsequence(request, task_id, None)
 
 
@@ -55,7 +56,7 @@ def label_subsequence(request, task_id, image_id):
                                                         synchronisedtrackingdata__isnull=False).order_by("id")
             branch_code = {td.id -1: td.branch_code for td in tracking_data}
 
-
+            context["branch_codes_json"] = json.dumps(branch_code)
             #print("Frame predictions:", frame_predictions)
             #print("Branch codes:", branch_code)
 
@@ -120,14 +121,17 @@ def save_labels(request):
                 'message': 'Completed'
             }
         else:
-            with transaction.atomic():
+            with (transaction.atomic()):
                 annotations = common.task.save_annotation(request)
                 print("Annotations:", annotations)
                 frame_labels = json.loads(request.POST['frame_labels'])
                 print("Annotations:", annotations)
                 custom_frame_labels = json.loads(request.POST.get('custom_frame_labels', '{}')) # Load custom frame labels if provided (from text boxes)
                 print("Custom frame labels:", custom_frame_labels)
-                # Save standard and custom labels for annotated frames
+                # NEW: parse custom label colors dict
+                custom_label_colors = json.loads(request.POST.get('custom_frame_label_colors', '{}'))
+
+                # Save standard labels for annotated frames
                 for annotation in annotations:
                     SubsequenceLabel.objects.filter(image=annotation).delete()
                     label_ids = frame_labels.get(str(annotation.frame_nr), [])
@@ -142,14 +146,29 @@ def save_labels(request):
                         #
                         labeled_image.save()
 
-                    # Save custom label if present
+                    # Save custom texbox labels if present
                     custom_label = custom_frame_labels.get(str(annotation.frame_nr))
                     if custom_label:
+                        # get or create Label *without* overwriting existing colors
                         label, created = Label.objects.get_or_create(
                             name=custom_label,
                             #task=annotation.image_annotation.task,
-                            defaults={'color_red': 128, 'color_green': 128, 'color_blue': 128}
+                            #defaults={'color_red': 128, 'color_green': 128, 'color_blue': 128}
                         )
+                        print(f"Custom label: {custom_label}, Created: {created}, Colors: {custom_label_colors.get(custom_label)}")
+                        #if created:
+                        color = custom_label_colors.get(custom_label)
+                        if color is not None:
+                            label.color_red = color.get('red')
+                            label.color_green = color.get('green')
+                            label.color_blue = color.get('blue')
+
+                        else:# assign some default color only once
+                            label.color_red = 128
+                            label.color_green = 128
+                            label.color_blue = 128
+                        label.save()
+
                         sublabel = SubsequenceLabel.objects.create(
                             image=annotation,
                             label=label,
@@ -172,9 +191,21 @@ def save_labels(request):
                         label, created = Label.objects.get_or_create(
                             name=custom_label,
                             #task=annotation.image_annotation.task,
-                            defaults={'color_red': 0, 'color_green': 255, 'color_blue': 0}
+                            #defaults={'color_red': 0, 'color_green': 255, 'color_blue': 0}
                         )
-                        sublabel = SubsequenceLabel.objects.create(
+                        #if created:
+                        color = custom_label_colors.get(custom_label)
+                        if color is not None:
+                            label.color_red = color.get('red', 128)
+                            label.color_green = color.get('green', 128)
+                            label.color_blue = color.get('blue', 128)
+                        else:
+                            label.color_red = 128
+                            label.color_green = 128
+                            label.color_blue = 128
+                        label.save()
+
+                        sublabel =  SubsequenceLabel.objects.create(
                             image=annotation,
                             label=label,
                             #task=annotation.image_annotation.task
