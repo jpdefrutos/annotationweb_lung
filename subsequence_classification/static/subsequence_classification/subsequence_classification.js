@@ -2,6 +2,7 @@ let g_backgroundImage;
 let g_frameNr;
 let g_currentColor = null;
 let g_labels = {}; // Dictionary with keys frame_nr which each has a label
+let g_labelColorMap = {}; // Maps label name -> hex color, to ensure unique colors
 
 let g_selectedLabels = [];
 let g_subsequenceStartFrame = null; // Start frame of subsequence

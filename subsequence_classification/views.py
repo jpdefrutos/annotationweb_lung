@@ -12,7 +12,6 @@ from annotationweb.models import Task, ImageAnnotation, KeyFrameAnnotation, Labe
 
 
 def label_next_image(request, task_id):
-
     return label_subsequence(request, task_id, None)
 
 
@@ -56,7 +55,6 @@ def label_subsequence(request, task_id, image_id):
                                                         synchronisedtrackingdata__isnull=False).order_by("id")
             branch_code = {td.id -1: td.branch_code for td in tracking_data}
 
-            context["branch_codes_json"] = json.dumps(branch_code)
             #print("Frame predictions:", frame_predictions)
             #print("Branch codes:", branch_code)
 
@@ -121,7 +119,7 @@ def save_labels(request):
                 'message': 'Completed'
             }
         else:
-            with (transaction.atomic()):
+            with transaction.atomic():
                 annotations = common.task.save_annotation(request)
                 print("Annotations:", annotations)
                 frame_labels = json.loads(request.POST['frame_labels'])
@@ -146,14 +144,13 @@ def save_labels(request):
                         #
                         labeled_image.save()
 
-                    # Save custom texbox labels if present
+                    # Save custom textbox labels if present
                     custom_label = custom_frame_labels.get(str(annotation.frame_nr))
                     if custom_label:
                         # get or create Label *without* overwriting existing colors
                         label, created = Label.objects.get_or_create(
                             name=custom_label,
-                            #task=annotation.image_annotation.task,
-                            #defaults={'color_red': 128, 'color_green': 128, 'color_blue': 128}
+                            #task=annotation.image_annotation.task
                         )
                         print(f"Custom label: {custom_label}, Created: {created}, Colors: {custom_label_colors.get(custom_label)}")
                         #if created:
