@@ -146,7 +146,7 @@ def save_labels(request):
                         #
                         labeled_image.save()
 
-                    # Save custom texbox labels if present
+                    # Save custom textbox labels if present
                     custom_label = custom_frame_labels.get(str(annotation.frame_nr))
                     if custom_label:
                         # get or create Label *without* overwriting existing colors
