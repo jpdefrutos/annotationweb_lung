@@ -56,7 +56,6 @@ def label_subsequence(request, task_id, image_id):
                                                         synchronisedtrackingdata__isnull=False).order_by("id")
             branch_code = {td.id -1: td.branch_code for td in tracking_data}
 
-            context["branch_codes_json"] = json.dumps(branch_code)
             #print("Frame predictions:", frame_predictions)
             #print("Branch codes:", branch_code)
 
