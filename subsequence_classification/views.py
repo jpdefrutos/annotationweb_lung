@@ -158,12 +158,23 @@ def save_labels(request):
                         print(f"Custom label: {custom_label}, Created: {created}, Colors: {custom_label_colors.get(custom_label)}")
                         #if created:
                         color = custom_label_colors.get(custom_label)
-                        if color is not None:
-                            label.color_red = color.get('red')
-                            label.color_green = color.get('green')
-                            label.color_blue = color.get('blue')
 
-                        else:# assign some default color only once
+                        def _coerce_color_channel(value, default=128):
+                            """
+                            Coerce a single color channel to an int between 0 and 255.
+                            Falls back to `default` if the value is missing or invalid.
+                            """
+                            try:
+                                ivalue = int(value)
+                            except (TypeError, ValueError):
+                                return default
+                            return max(0, min(255, ivalue))
+
+                        if isinstance(color, dict):
+                            label.color_red = _coerce_color_channel(color.get('red'), 128)
+                            label.color_green = _coerce_color_channel(color.get('green'), 128)
+                            label.color_blue = _coerce_color_channel(color.get('blue'), 128)
+                        else:  # assign some default color only once
                             label.color_red = 128
                             label.color_green = 128
                             label.color_blue = 128
