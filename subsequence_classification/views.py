@@ -204,17 +204,20 @@ def save_labels(request):
                             #task=annotation.image_annotation.task,
                             #defaults={'color_red': 0, 'color_green': 255, 'color_blue': 0}
                         )
-                        #if created:
-                        color = custom_label_colors.get(custom_label)
-                        if color is not None:
-                            label.color_red = color.get('red', 128)
-                            label.color_green = color.get('green', 128)
-                            label.color_blue = color.get('blue', 128)
-                        else:
-                            label.color_red = 128
-                            label.color_green = 128
-                            label.color_blue = 128
-                        label.save()
+                        # Only set the label color when the label is newly created
+                        # or when its color fields are not yet set, to avoid
+                        # changing colors for existing shared labels.
+                        if created or label.color_red is None or label.color_green is None or label.color_blue is None:
+                            color = custom_label_colors.get(custom_label)
+                            if color is not None:
+                                label.color_red = color.get('red', 128)
+                                label.color_green = color.get('green', 128)
+                                label.color_blue = color.get('blue', 128)
+                            else:
+                                label.color_red = 128
+                                label.color_green = 128
+                                label.color_blue = 128
+                            label.save()
 
                         sublabel =  SubsequenceLabel.objects.create(
                             image=annotation,
