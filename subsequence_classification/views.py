@@ -15,8 +15,6 @@ import re
 def label_next_image(request, task_id):
     return label_subsequence(request, task_id, None)
 
-
-
 def get_frame_label_ids(request, frame_id):
     try:
         frame = KeyFrameAnnotation.objects.get(id=frame_id)
@@ -54,8 +52,7 @@ def label_subsequence(request, task_id, image_id):
 
             # Calculate start and end frame (matching the definition of start and end in subsequence_classification.js  loadSequence function)
             task = context['task']
-            start_frame = task.image_sequence.start_frame_index if hasattr(sequence,
-                                                                               'start_frame_index') else 0
+            start_frame = sequence.start_frame_nr
             nr_of_frames = sequence.nr_of_frames
 
             if task.show_entire_sequence or not task.annotate_single_frame:
@@ -86,10 +83,6 @@ def label_subsequence(request, task_id, image_id):
                         branch_code[frame_nr] = std.tracking_data.branch_code
 
             ## Load tracking data sync if available (obs! (td.id -1) corresponds to frame_nr)
-            #tracking_data = TrackingData.objects.filter(subject_id=sequence.subject,
-             #                                           synchronisedtrackingdata__isnull=False).order_by("id")
-            #branch_code = {td.id -1: td.branch_code for td in tracking_data}
-
 
             #print("Frame predictions:", frame_predictions)
             #print("Branch codes:", branch_code)
@@ -115,8 +108,6 @@ def label_subsequence(request, task_id, image_id):
 
             context["frame_predictions"] = frame_predictions
             context["frame_predictions_json"] = json.dumps(context["frame_predictions"])
-            #context["tracking_data_sync"] = branch_code
-            #context["tracking_data_sync_json"] = json.dumps(context["branch_code"])
 
             context["branch_codes"] = chosen_codes
             context["branch_codes_json"] = json.dumps(chosen_codes)
