@@ -2,6 +2,7 @@ let g_backgroundImage;
 let g_frameNr;
 let g_currentColor = null;
 let g_labels = {}; // Dictionary with keys frame_nr which each has a label
+let g_labelColorMap = {}; // Maps label name -> hex color, to ensure unique colors
 
 let g_selectedLabels = [];
 let g_subsequenceStartFrame = null; // Start frame of subsequence
@@ -51,8 +52,36 @@ function loadSubsequenceClassificationTask() {
     endSubsequence.onclick = endButtonClick;
 }
 
+// helper to convert "#rrggbb" to {red, green, blue}
+function hexToRgbObject(hex) {
+    const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    if (!m) return null;
+    return {
+        red: parseInt(m[1], 16),
+        green: parseInt(m[2], 16),
+        blue: parseInt(m[3], 16),
+    };
+}
+
+// Build a dict: label name -> {red, green, blue}
+function buildCustomLabelColors() {
+    const colors = {};
+    for (const [frameStr, labelName] of Object.entries(g_customFrameLabels)) {
+        const hex = stringToColor(labelName);
+        const rgb = hexToRgbObject(hex);
+        if (rgb && !colors[labelName]) {
+            colors[labelName] = rgb;
+        }
+    }
+    return colors;
+}
+
+
 // Function to send data for saving
 function sendDataForSave() {
+    // build mapping: label name -> {red, green, blue}
+    const customLabelColors = buildCustomLabelColors();
+
     return $.ajax({
         type: "POST",
         url: "/subsequence-classification/save/",
@@ -61,6 +90,7 @@ function sendDataForSave() {
             task_id: g_taskID,
             frame_labels: JSON.stringify(g_labels),
             custom_frame_labels: JSON.stringify(g_customFrameLabels), // Send custom labels as JSON string
+            custom_frame_label_colors: JSON.stringify(customLabelColors),
             target_frames: JSON.stringify(g_targetFrames),
             quality: $('input[name=quality]:checked').val() || 'unknown', // Default to unknown if no quality is selected
             rejected: g_rejected ? 'true':'false',
@@ -144,7 +174,9 @@ function endButtonClick(e) {
             return;
         }
 
-        const color = '#ff0000';
+        //const color = '#ff0000';
+        const color = stringToColor(g_subsequenceCustomLabel); // Generate color from label text
+
         for (let frame = g_subsequenceStartFrame; frame <= g_currentFrameNr; frame++) {
             g_customFrameLabels[frame] = g_subsequenceCustomLabel;
             setupSliderMark(frame, color);
@@ -287,6 +319,27 @@ function redrawSequence() {
     g_context.drawImage(g_sequence[index], 0, 0, g_canvasWidth, g_canvasHeight); // Draw background image
 }
 
+function updateSliderForLabelChange(frame_nr, label_ids) {
+    // Ensure label_ids is always an array
+    if (!Array.isArray(label_ids)) {
+        label_ids = [label_ids];
+    }
+
+    // Check for custom label
+    if (g_customFrameLabels[frame_nr]) {
+        const customColor = stringToColor(g_customFrameLabels[frame_nr]);
+        setupSliderMark(frame_nr, customColor);
+    } else {
+        // Use the first label's color
+        const label = getLabelWithId(label_ids[0]);
+        if (label) {
+            const hexColor = colorToHexString(label.red, label.green, label.blue);
+            setupSliderMark(frame_nr, hexColor);
+        }
+    }
+}
+
+
 function setLabel(frame_nr, label_ids) {
     // Ensure label_ids is always an array
     if (!Array.isArray(label_ids)) {
@@ -295,9 +348,12 @@ function setLabel(frame_nr, label_ids) {
     g_labels[frame_nr] = label_ids;
 
     // Update slider marker for frame (use first label's color or customize)
-    let label = getLabelWithId(label_ids[0]);
-    let hexColor = colorToHexString(label.red, label.green, label.blue);
-    setupSliderMark(frame_nr, hexColor);
+    //let label = getLabelWithId(label_ids[0]);
+    //let hexColor = colorToHexString(label.red, label.green, label.blue);
+    //setupSliderMark(frame_nr, hexColor);
+
+    // Update the slider marker
+    updateSliderForLabelChange(frame_nr, label_ids);
 }
 
 function addSubsequenceLabel(frame_nr, label_id) {
@@ -314,21 +370,44 @@ function addSubsequenceLabel(frame_nr, label_id) {
     // addSubsequenceLabel(frame, label_id);
     //}
     // Optionally update slider marker for the first label
-    let label = getLabelWithId(g_labels[frame_nr][0]);
-    if (label) {
-        let hexColor = colorToHexString(label.red, label.green, label.blue);
-        setupSliderMark(frame_nr, hexColor);
-    }
+    //let label = getLabelWithId(g_labels[frame_nr][0]);
+    //if (label) {
+    //    let hexColor = colorToHexString(label.red, label.green, label.blue);
+    //    setupSliderMark(frame_nr, hexColor);
+    //}
 
+    // Update the slider marker
+    updateSliderForLabelChange(frame_nr, g_labels[frame_nr]);
 
 }
+
+function stringToColor(str) {
+    // Simple hash to color
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+        hash = str.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    let color = '#';
+    for (let i = 0; i < 3; i++) {
+        let value = (hash >> (i * 8)) & 0xFF;
+        color += ('00' + value.toString(16)).substr(-2);
+    }
+    return color;
+}
+
 
 function updateFrameLabelVariables() {
     // --- Update current frame label --- // Check for custom label first
     const customLabel = g_customFrameLabels[g_currentFrameNr];
     if (customLabel) {
+        const color = stringToColor(customLabel); // Generate color from label text
         $('#currentFrameLabel').text(customLabel);
         $('#currentFrameLabelDisplay').text(customLabel);
+
+        $('#currentFrameLabel').html(`<span style="color: ${color}">${customLabel}</span>`);
+        $('#currentFrameLabelDisplay').html(
+            `<span style="color: ${color}">${customLabel}</span>`
+        );
         return;
     }
     const labelIds = g_labels[g_currentFrameNr] || [];
@@ -594,18 +673,18 @@ function loadSequence(
     }
 }
 
-function addLabelButton(label_id, label_name, red, green, blue, parent_id) {
+function addLabelButton(label_id, label_name,  color_red, color_green, color_blue, parent_id) {
     var labelButton = {
         id: label_id,
         name: label_name,
-        red: red,
-        green: green,
-        blue: blue,
+        red: color_red,
+        green: color_green,
+        blue: color_blue,
         parent_id: parent_id,
     };
     g_labelButtons.push(labelButton);
 
-    $("#labelButton" + label_id).css("background-color", colorToHexString(red, green, blue));
+    $("#labelButton" + label_id).css("background-color", colorToHexString(color_red, color_green, color_blue));
 
     // TODO finish
     if(parent_id != 0) {
