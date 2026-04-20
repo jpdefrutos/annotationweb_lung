@@ -8,13 +8,12 @@ from django.db import transaction
 
 import common.task
 from .models import *
-from annotationweb.models import Task, ImageAnnotation, KeyFrameAnnotation, Label, TrackingData
+from annotationweb.models import Task, ImageAnnotation, KeyFrameAnnotation, Label, TrackingData, SynchronisedTrackingData
+import re
 
 
 def label_next_image(request, task_id):
     return label_subsequence(request, task_id, None)
-
-
 
 def get_frame_label_ids(request, frame_id):
     try:
@@ -50,11 +49,40 @@ def label_subsequence(request, task_id, image_id):
                 print(f"Frame {fp.frame_nr}: Predicted class = {fp.predicted_class_info}")
             frame_predictions = {fp.frame_nr: fp.predicted_class_info for fp in frame_predictions_qs}
 
-            # Load tracking data sync if available (obs! (td.id -1) corresponds to frame_nr)
-            tracking_data = TrackingData.objects.filter(subject_id=sequence.subject,
-                                                        synchronisedtrackingdata__isnull=False).order_by("id")
-            branch_code = {td.id -1: td.branch_code for td in tracking_data}
 
+            # Calculate start and end frame (matching the definition of start and end in subsequence_classification.js  loadSequence function)
+            task = context['task']
+            start_frame = sequence.start_frame_nr
+            nr_of_frames = sequence.nr_of_frames
+
+            if task.show_entire_sequence or not task.annotate_single_frame:
+                start = start_frame
+                end = start_frame + nr_of_frames - 1
+            else:
+                # Use target frame or 0 as current frame
+                target_frames = context.get('target_frames', [])
+                current_frame = target_frames[0] if target_frames else 0
+                start = max(start_frame, current_frame - task.images_to_load_before)
+                end = min(start_frame + nr_of_frames - 1, current_frame + task.images_to_load_after)
+
+            synced_tracking = SynchronisedTrackingData.objects.filter(
+                tracking_data__subject_id=sequence.subject
+            ).select_related('tracking_data')
+
+            print(f"Frame range: start={start}, end={end}")
+
+            #extract branch codes for frames in the range start to end using the filename to get the frame number (assuming filename contains _{frame_nr}.mhd)
+            branch_code = {}
+            for std in synced_tracking:
+                filename = std.filename
+                match = re.search(r'_(\d+)\.mhd$', filename)
+                if match:
+                    frame_nr = int(match.group(1))
+
+                    if start <= frame_nr <= end:
+                        branch_code[frame_nr] = std.tracking_data.branch_code
+
+            ## Load tracking data sync if available (obs! (td.id -1) corresponds to frame_nr)
 
             #print("Frame predictions:", frame_predictions)
             #print("Branch codes:", branch_code)
@@ -80,8 +108,6 @@ def label_subsequence(request, task_id, image_id):
 
             context["frame_predictions"] = frame_predictions
             context["frame_predictions_json"] = json.dumps(context["frame_predictions"])
-            #context["tracking_data_sync"] = branch_code
-            #context["tracking_data_sync_json"] = json.dumps(context["branch_code"])
 
             context["branch_codes"] = chosen_codes
             context["branch_codes_json"] = json.dumps(chosen_codes)
