@@ -392,6 +392,20 @@ function stringToColor(str) {
         let value = (hash >> (i * 8)) & 0xFF;
         color += ('00' + value.toString(16)).substr(-2);
     }
+    // Check if color is already used by another label, and shift if so
+    const usedColors = g_labelButtons.map(lb => lb.color);
+    let attempts = 0;
+    while (usedColors.includes(color) && attempts < 100) {
+        hash = hash + 1;
+        color = '#';
+        for (let i = 0; i < 3; i++) {
+            let value = (hash >> (i * 8)) & 0xFF;
+            color += ('00' + value.toString(16)).substr(-2);
+        }
+        attempts++;
+    }
+
+
     return color;
 }
 
@@ -673,18 +687,18 @@ function loadSequence(
     }
 }
 
-function addLabelButton(label_id, label_name,  color_red, color_green, color_blue, parent_id) {
+function addLabelButton(label_id, label_name,  red, green, blue, parent_id) {
     var labelButton = {
         id: label_id,
         name: label_name,
-        red: color_red,
-        green: color_green,
-        blue: color_blue,
+        red: red,
+        green: green,
+        blue: blue,
         parent_id: parent_id,
     };
     g_labelButtons.push(labelButton);
 
-    $("#labelButton" + label_id).css("background-color", colorToHexString(color_red, color_green, color_blue));
+    $("#labelButton" + label_id).css("background-color", colorToHexString(red, green, blue));
 
     // TODO finish
     if(parent_id != 0) {
