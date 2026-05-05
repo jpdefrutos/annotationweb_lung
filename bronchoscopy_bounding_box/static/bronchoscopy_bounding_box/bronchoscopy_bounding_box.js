@@ -1,5 +1,6 @@
 var g_backgroundImage;
 var g_paint = false;
+var g_subsequenceLabels = {};
 var g_frameNr;
 var g_BBx;
 var g_BBy;
@@ -215,6 +216,9 @@ function redrawSequence() {
     var index = g_currentFrameNr - g_startFrame;
     g_context.drawImage(g_sequence[index], 0, 0, g_canvasWidth, g_canvasHeight);
     redraw();
+    var label = String(g_currentFrameNr) in g_subsequenceLabels
+        ? g_subsequenceLabels[String(g_currentFrameNr)] : 'N/A';
+    $('#subsequenceLabel').text(label);
 }
 
 function copyToNext() {

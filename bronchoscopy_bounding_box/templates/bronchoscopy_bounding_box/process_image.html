@@ -10,6 +10,8 @@
 
 {% block task_javascript %}
 
+g_subsequenceLabels = {{ frame_labels_json|safe }};
+
 {% for box in boxes %}
 addBox({{ box.image.frame_nr }}, {{ box.x }}, {{ box.y }}, {{ box.x }} + {{ box.width }}, {{ box.y }} + {{ box.height }}, '{{ box.label|escapejs }}', '{{ box.color }}');
 {% endfor %}
@@ -26,5 +28,11 @@ loadBBTask({{ image_sequence.id }});
     <button type="button" onclick="copyToNext()">Copy to next frame</button>
 </div>
 {% endblock %}
+
+{% block task_content %}
+<div style="margin-top: 6px;">
+    <strong>Current branch:</strong> <span id="subsequenceLabel">N/A</span>
+</div>
+{% endblock task_content %}
 
 {% block task_instructions %}{% endblock task_instructions %}

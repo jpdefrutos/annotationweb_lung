@@ -4,6 +4,7 @@ from django.http import JsonResponse
 from annotationweb.models import Task
 from common.task import setup_task_context, save_annotation, NoMoreImages
 from .models import BronchoscopyBoundingBox
+from subsequence_classification.models import SubsequenceLabel
 
 
 def process_next_image(request, task_id):
@@ -15,6 +16,15 @@ def process_image(request, task_id, image_id):
         context = setup_task_context(request, task_id, Task.BRONCHOSCOPY_BOUNDING_BOX, image_id)
         context['javascript_files'] = ['bronchoscopy_bounding_box/bronchoscopy_bounding_box.js']
         context['boxes'] = BronchoscopyBoundingBox.objects.filter(image__in=context['frames'])
+
+        frame_labels = {}
+        if context.get('image_sequence'):
+            for sl in SubsequenceLabel.objects.filter(
+                image__image_annotation__image=context['image_sequence']
+            ).select_related('image', 'label'):
+                frame_labels[sl.image.frame_nr] = sl.label.name
+        context['frame_labels_json'] = json.dumps(frame_labels)
+
         return render(request, 'bronchoscopy_bounding_box/process_image.html', context)
     except NoMoreImages:
         return redirect('index')
