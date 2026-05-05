@@ -52,6 +52,7 @@ class Task(models.Model):
     SPLINE_LINE_POINT = 'spline_line_point'
     VIDEO_ANNOTATION = 'video_annotation'
     SUBSEQUENCE_CLASSIFICATION = 'subsequence_classification'
+    BRONCHOSCOPY_BOUNDING_BOX = 'bronchoscopy_bounding_box'
     TASK_TYPES = (
         (CLASSIFICATION, 'Classification'),
         (BLIND_CLASSIFICATION, 'Blind classification'),
@@ -64,7 +65,8 @@ class Task(models.Model):
         (SPLINE_LINE_POINT, 'Splines, lines & point segmentation'),
         (IMAGE_QUALITY, 'Image Quality'),
         (VIDEO_ANNOTATION, 'Video annotation'),
-        (SUBSEQUENCE_CLASSIFICATION, 'Subsequence classification')
+        (SUBSEQUENCE_CLASSIFICATION, 'Subsequence classification'),
+        (BRONCHOSCOPY_BOUNDING_BOX, 'Bronchoscopy bounding box'),
     )
 
     name = models.CharField(max_length=200)

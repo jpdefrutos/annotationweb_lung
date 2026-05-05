@@ -1,0 +1,30 @@
+{% extends 'annotationweb/do_task.html' %}
+
+{% block label_buttons %}
+<div style="margin-bottom: 8px;">
+    <label for="boxLabel"><strong>Box label:</strong></label>
+    <input type="text" id="boxLabel" placeholder="Enter label"
+           style="width: 100%; margin-top: 4px; padding: 4px 6px; box-sizing: border-box;">
+</div>
+{% endblock label_buttons %}
+
+{% block task_javascript %}
+
+{% for box in boxes %}
+addBox({{ box.image.frame_nr }}, {{ box.x }}, {{ box.y }}, {{ box.x }} + {{ box.width }}, {{ box.y }} + {{ box.height }}, '{{ box.label|escapejs }}', '{{ box.color }}');
+{% endfor %}
+g_nextColorIndex = {{ boxes|length }};
+
+{% if image_sequence %}
+loadBBTask({{ image_sequence.id }});
+{% endif %}
+
+{% endblock task_javascript %}
+
+{% block CopyContentButton %}
+<div id="CopyContentButton">
+    <button type="button" onclick="copyToNext()">Copy to next frame</button>
+</div>
+{% endblock %}
+
+{% block task_instructions %}{% endblock task_instructions %}
