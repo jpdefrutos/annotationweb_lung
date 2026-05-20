@@ -44,7 +44,7 @@ urlpatterns = [
     path('spline-segmentation/', include('spline_segmentation.urls')),
     path('video-annotation/', include('video_annotation.urls')),
     path('subsequence-classification/', include('subsequence_classification.urls')),
-    path('bronchoscopy-bounding-box/', include('bronchoscopy_bounding_box.urls')),
+    path('bronchoscopy-bounding-box/', include('bronchoscopy_boundingbox.urls')),
 ]
 
 # This is for making statics in a development environment

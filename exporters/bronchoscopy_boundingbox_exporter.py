@@ -7,7 +7,7 @@ from django import forms
 from django.http import HttpResponse
 
 from annotationweb.models import Task, Subject, KeyFrameAnnotation
-from bronchoscopy_bounding_box.models import BronchoscopyBoundingBox
+from bronchoscopy_boundingbox.models import BronchoscopyBoundingBox
 from common.exporter import Exporter
 from common.utility import create_folder, copy_image
 

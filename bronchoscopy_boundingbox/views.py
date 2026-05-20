@@ -14,7 +14,7 @@ def process_next_image(request, task_id):
 def process_image(request, task_id, image_id):
     try:
         context = setup_task_context(request, task_id, Task.BRONCHOSCOPY_BOUNDING_BOX, image_id)
-        context['javascript_files'] = ['bronchoscopy_bounding_box/bronchoscopy_bounding_box.js']
+        context['javascript_files'] = ['bronchoscopy_boundingbox/bronchoscopy_boundingbox.js']
         context['boxes'] = BronchoscopyBoundingBox.objects.filter(image__in=context['frames'])
 
         frame_labels = {}
@@ -25,7 +25,7 @@ def process_image(request, task_id, image_id):
                 frame_labels[sl.image.frame_nr] = sl.label.name
         context['frame_labels_json'] = json.dumps(frame_labels)
 
-        return render(request, 'bronchoscopy_bounding_box/process_image.html', context)
+        return render(request, 'bronchoscopy_boundingbox/process_image.html', context)
     except NoMoreImages:
         return redirect('index')
     except RuntimeError:

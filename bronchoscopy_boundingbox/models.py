@@ -8,5 +8,5 @@ class BronchoscopyBoundingBox(models.Model):
     y = models.PositiveIntegerField()
     width = models.PositiveIntegerField()
     height = models.PositiveIntegerField()
-    label = models.CharField(max_length=255, blank=True)
+    label = models.CharField(max_length=255, blank=False)
     color = models.CharField(max_length=7)  # hex color, e.g. '#e6194b'

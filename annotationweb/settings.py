@@ -54,7 +54,7 @@ INSTALLED_APPS = [
     'cardiac_apical_long_axis',
     'video_annotation',
     'subsequence_classification',
-    'bronchoscopy_bounding_box',
+    'bronchoscopy_boundingbox',
     'image_quality',
     'django_otp',
     'django_otp.plugins.otp_totp',

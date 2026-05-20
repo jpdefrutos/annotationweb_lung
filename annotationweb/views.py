@@ -468,7 +468,7 @@ def task_description(request, task_id):
     elif task.type == task.SUBSEQUENCE_CLASSIFICATION:
         url = reverse('subsequence_classification:label_subsequence', args=[task_id])
     elif task.type == task.BRONCHOSCOPY_BOUNDING_BOX:
-        url = reverse('bronchoscopy_bounding_box:process_image', args=[task_id])
+        url = reverse('bronchoscopy_boundingbox:process_image', args=[task_id])
     else:
         raise NotImplementedError()
 
@@ -649,7 +649,7 @@ def get_redirection(task):
     elif task.type == Task.SUBSEQUENCE_CLASSIFICATION:
         return 'subsequence_classification:label_subsequence'
     elif task.type == Task.BRONCHOSCOPY_BOUNDING_BOX:
-        return 'bronchoscopy_bounding_box:process_image'
+        return 'bronchoscopy_boundingbox:process_image'
     else:
         raise NotImplementedError()
 

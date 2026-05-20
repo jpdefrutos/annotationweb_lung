@@ -1,7 +1,7 @@
 from django.urls import path
 from . import views
 
-app_name = 'bronchoscopy_bounding_box'
+app_name = 'bronchoscopy_boundingbox'
 
 urlpatterns = [
     path('process/<int:task_id>/', views.process_next_image, name='process_image'),

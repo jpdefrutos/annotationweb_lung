@@ -45,6 +45,11 @@ function setupSegmentation() {
                 g_move = true;
             return;
         }
+        if (!getCurrentLabel()) {
+            var el = document.getElementById('boxLabel');
+            if (el) { el.style.outline = '2px solid red'; setTimeout(function(){ el.style.outline = ''; }, 1000); }
+            return;
+        }
         g_paint = true;
     });
 
@@ -181,7 +186,7 @@ function labelExistsInFrame(frame_nr, label) {
 
 function redraw() {
     // Draw in-progress box (only if label not already used in this frame)
-    if (g_paint && !labelExistsInFrame(g_currentFrameNr, getCurrentLabel())) {
+    if (g_paint && getCurrentLabel() && !labelExistsInFrame(g_currentFrameNr, getCurrentLabel())) {
         var previewColor = BOX_COLORS[g_nextColorIndex % BOX_COLORS.length];
         var preview = createBox(g_BBx, g_BBy, g_BBx2, g_BBy2, '', previewColor);
         g_context.beginPath();
