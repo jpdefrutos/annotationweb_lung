@@ -13,16 +13,38 @@ var g_resize = false;
 var g_invalidBoxNr = 999999;
 var g_currentBox = g_invalidBoxNr;
 var g_cornerSize = 20;
-var g_nextColorIndex = 0;
+var g_labelColorMap = {}; // Maps label name -> hex color
 
-var BOX_COLORS = [
-    '#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4',
-    '#42d4f4', '#f032e6', '#bfef45', '#469990', '#dcbeff'
-];
+function hslToHex(h, s, l) {
+    s /= 100;
+    l /= 100;
+    const a = s * Math.min(l, 1 - l);
+    const f = n => {
+        const k = (n + h / 30) % 12;
+        const v = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
+        return Math.round(255 * v).toString(16).padStart(2, '0');
+    };
+    return '#' + f(0) + f(8) + f(4);
+}
 
-function getNextColor() {
-    var color = BOX_COLORS[g_nextColorIndex % BOX_COLORS.length];
-    g_nextColorIndex++;
+function stringToColor(str) {
+    if (g_labelColorMap[str]) return g_labelColorMap[str];
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+        hash = str.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    // Multiply by the golden angle (137.508°) so hash values that differ
+    // by 1 land 137.5° apart on the hue wheel, avoiding clusters
+    const hue = n => (Math.abs(n) * 137.508) % 360;
+    let color = hslToHex(hue(hash), 65, 50);
+    const usedColors = Object.values(g_labelColorMap);
+    let attempts = 0;
+    while (usedColors.includes(color) && attempts < 100) {
+        hash += 1;
+        color = hslToHex(hue(hash), 65, 50);
+        attempts++;
+    }
+    g_labelColorMap[str] = color;
     return color;
 }
 
@@ -166,7 +188,8 @@ function createBox(x, y, x2, y2, label, color) {
 function addBox(frame_nr, x, y, x2, y2, label, color) {
     if (Math.abs(x2 - x) > g_minimumSize && Math.abs(y2 - y) > g_minimumSize) {
         if (labelExistsInFrame(frame_nr, label)) return;
-        if (!color) color = getNextColor();
+        if (!color) color = stringToColor(label);
+        else if (label && !g_labelColorMap[label]) g_labelColorMap[label] = color;
         var box = createBox(x, y, x2, y2, label, color);
         if (!(frame_nr in g_boxes))
             g_boxes[frame_nr] = [];
@@ -187,7 +210,7 @@ function labelExistsInFrame(frame_nr, label) {
 function redraw() {
     // Draw in-progress box (only if label not already used in this frame)
     if (g_paint && getCurrentLabel() && !labelExistsInFrame(g_currentFrameNr, getCurrentLabel())) {
-        var previewColor = BOX_COLORS[g_nextColorIndex % BOX_COLORS.length];
+        var previewColor = stringToColor(getCurrentLabel());
         var preview = createBox(g_BBx, g_BBy, g_BBx2, g_BBy2, '', previewColor);
         g_context.beginPath();
         g_context.lineWidth = 2;

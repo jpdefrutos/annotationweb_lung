@@ -13,9 +13,8 @@
 g_subsequenceLabels = {{ frame_labels_json|safe }};
 
 {% for box in boxes %}
-addBox({{ box.image.frame_nr }}, {{ box.x }}, {{ box.y }}, {{ box.x }} + {{ box.width }}, {{ box.y }} + {{ box.height }}, '{{ box.label|escapejs }}', '{{ box.color }}');
+addBox({{ box.image.frame_nr }}, {{ box.x }}, {{ box.y }}, {{ box.x }} + {{ box.width }}, {{ box.y }} + {{ box.height }}, '{{ box.label|escapejs }}');
 {% endfor %}
-g_nextColorIndex = {{ boxes|length }};
 
 {% if image_sequence %}
 loadBBTask({{ image_sequence.id }});

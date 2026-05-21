@@ -1,10 +1,15 @@
 import json
 from django.shortcuts import render, redirect
 from django.http import JsonResponse
-from annotationweb.models import Task
+from annotationweb.models import Task, Label
 from common.task import setup_task_context, save_annotation, NoMoreImages
 from .models import BronchoscopyBoundingBox
 from subsequence_classification.models import SubsequenceLabel
+
+
+def _hex_to_rgb(hex_color):
+    h = hex_color.lstrip('#')
+    return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
 
 
 def process_next_image(request, task_id):
@@ -36,6 +41,21 @@ def save_boxes(request):
     try:
         annotations = save_annotation(request)
         boxes_data = json.loads(request.POST['boxes'])
+
+        task = Task.objects.get(pk=int(request.POST['task_id']))
+        existing_label_names = set(task.label.values_list('name', flat=True))
+        label_colors = {}
+        for frame_boxes in boxes_data.values():
+            for box in frame_boxes:
+                name = box.get('label', '').strip()
+                if name and name not in label_colors:
+                    label_colors[name] = box.get('color', '#e6194b')
+        for name, hex_color in label_colors.items():
+            if name not in existing_label_names:
+                r, g, b = _hex_to_rgb(hex_color)
+                new_label = Label.objects.create(name=name, color_red=r, color_green=g, color_blue=b)
+                task.label.add(new_label)
+
         for annotation in annotations:
             frame_nr = str(annotation.frame_nr)
             for box in boxes_data[frame_nr]:
@@ -46,7 +66,6 @@ def save_boxes(request):
                     width=int(box['width']),
                     height=int(box['height']),
                     label=box.get('label', ''),
-                    color=box.get('color', '#e6194b'),
                 )
         return JsonResponse({'success': 'true', 'message': 'Completed'})
     except Exception as e:
