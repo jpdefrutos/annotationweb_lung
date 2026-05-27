@@ -13,40 +13,6 @@ var g_resize = false;
 var g_invalidBoxNr = 999999;
 var g_currentBox = g_invalidBoxNr;
 var g_cornerSize = 20;
-var g_labelColorMap = {}; // Maps label name -> hex color
-
-function hslToHex(h, s, l) {
-    s /= 100;
-    l /= 100;
-    const a = s * Math.min(l, 1 - l);
-    const f = n => {
-        const k = (n + h / 30) % 12;
-        const v = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
-        return Math.round(255 * v).toString(16).padStart(2, '0');
-    };
-    return '#' + f(0) + f(8) + f(4);
-}
-
-function stringToColor(str) {
-    if (g_labelColorMap[str]) return g_labelColorMap[str];
-    let hash = 0;
-    for (let i = 0; i < str.length; i++) {
-        hash = str.charCodeAt(i) + ((hash << 5) - hash);
-    }
-    // Multiply by the golden angle (137.508°) so hash values that differ
-    // by 1 land 137.5° apart on the hue wheel, avoiding clusters
-    const hue = n => (Math.abs(n) * 137.508) % 360;
-    let color = hslToHex(hue(hash), 65, 50);
-    const usedColors = Object.values(g_labelColorMap);
-    let attempts = 0;
-    while (usedColors.includes(color) && attempts < 100) {
-        hash += 1;
-        color = hslToHex(hue(hash), 65, 50);
-        attempts++;
-    }
-    g_labelColorMap[str] = color;
-    return color;
-}
 
 function getCurrentLabel() {
     var input = document.getElementById('boxLabel');
