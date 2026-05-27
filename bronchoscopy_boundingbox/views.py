@@ -1,4 +1,5 @@
 import json
+from django.db import transaction
 from django.shortcuts import render, redirect
 from django.http import JsonResponse
 from annotationweb.models import Task, Label
@@ -39,34 +40,37 @@ def process_image(request, task_id, image_id):
 
 def save_boxes(request):
     try:
-        annotations = save_annotation(request)
-        boxes_data = json.loads(request.POST['boxes'])
+        with transaction.atomic():
+            annotations = save_annotation(request)
+            boxes_data = json.loads(request.POST['boxes'])
 
-        task = Task.objects.get(pk=int(request.POST['task_id']))
-        existing_label_names = set(task.label.values_list('name', flat=True))
-        label_colors = {}
-        for frame_boxes in boxes_data.values():
-            for box in frame_boxes:
-                name = box.get('label', '').strip()
-                if name and name not in label_colors:
-                    label_colors[name] = box.get('color', '#e6194b')
-        for name, hex_color in label_colors.items():
-            if name not in existing_label_names:
-                r, g, b = _hex_to_rgb(hex_color)
-                new_label = Label.objects.create(name=name, color_red=r, color_green=g, color_blue=b)
-                task.label.add(new_label)
+            task = Task.objects.get(pk=int(request.POST['task_id']))
+            existing_label_names = set(task.label.values_list('name', flat=True))
+            label_colors = {}
+            for frame_boxes in boxes_data.values():
+                for box in frame_boxes:
+                    name = box.get('label', '').strip()
+                    if name and name not in label_colors:
+                        label_colors[name] = box.get('color', '#e6194b')
+            for name, hex_color in label_colors.items():
+                if name not in existing_label_names:
+                    r, g, b = _hex_to_rgb(hex_color)
+                    new_label = Label.objects.create(name=name, color_red=r, color_green=g, color_blue=b)
+                    task.label.add(new_label)
 
-        for annotation in annotations:
-            frame_nr = str(annotation.frame_nr)
-            for box in boxes_data[frame_nr]:
-                BronchoscopyBoundingBox.objects.create(
-                    image=annotation,
-                    x=int(box['x']),
-                    y=int(box['y']),
-                    width=int(box['width']),
-                    height=int(box['height']),
-                    label=box.get('label', ''),
-                )
+            for annotation in annotations:
+                frame_nr = str(annotation.frame_nr)
+                if frame_nr not in boxes_data:
+                    continue  # key frame exists but user drew no boxes on it
+                for box in boxes_data[frame_nr]:
+                    BronchoscopyBoundingBox.objects.create(
+                        image=annotation,
+                        x=int(box['x']),
+                        y=int(box['y']),
+                        width=int(box['width']),
+                        height=int(box['height']),
+                        label=box.get('label', ''),
+                    )
         return JsonResponse({'success': 'true', 'message': 'Completed'})
     except Exception as e:
         return JsonResponse({'success': 'false', 'message': str(e)})
