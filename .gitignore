@@ -4,7 +4,6 @@
 /env
 /segmentations
 /imported_data
-/annotationweb/migrations
 *.sqlite3
 *.log
 *.pot
