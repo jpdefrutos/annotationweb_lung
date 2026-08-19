@@ -122,23 +122,31 @@ function removeBox(boxNr) {
     redrawSequence();
 }
 
+function clamp(v, lo, hi) {
+    return Math.max(lo, Math.min(v, hi));
+}
+
 function moveBox(boxNr, xDiff, yDiff) {
     var box = g_boxes[g_currentFrameNr][boxNr];
-    box.x += xDiff;
-    box.y += yDiff;
+    box.x = clamp(box.x + xDiff, 0, g_canvasWidth - box.width);
+    box.y = clamp(box.y + yDiff, 0, g_canvasHeight - box.height);
     redrawSequence();
 }
 
 function resizeBox(boxNr, xDiff, yDiff) {
     var box = g_boxes[g_currentFrameNr][boxNr];
     if (box.width > -xDiff + g_minimumSize)
-        box.width += xDiff;
+        box.width = clamp(box.width + xDiff, g_minimumSize, g_canvasWidth - box.x);
     if (box.height > -yDiff + g_minimumSize)
-        box.height += yDiff;
+        box.height = clamp(box.height + yDiff, g_minimumSize, g_canvasHeight - box.y);
     redrawSequence();
 }
 
 function createBox(x, y, x2, y2, label, color) {
+    x = clamp(x, 0, g_canvasWidth);
+    y = clamp(y, 0, g_canvasHeight);
+    x2 = clamp(x2, 0, g_canvasWidth);
+    y2 = clamp(y2, 0, g_canvasHeight);
     var originX = Math.min(x, x2);
     var originY = Math.min(y, y2);
     return {
