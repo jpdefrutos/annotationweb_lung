@@ -207,12 +207,22 @@ function undoLastBoxAction() {
     rebuildLabelDropdown();
 }
 
-// Sort by hierarchy depth (comma-separated segment count) first, then alphabetically
-// e.g. "1" < "1,1" < "1,2" < "1,1,1" < "1,2,1"
+// Numeric-alphabetical sort of comma-separated segments, compared segment by
+// segment as numbers rather than as plain strings, so e.g. "1,2" < "1,10"
+// (a plain string compare would put "1,10" first). A label that is an exact
+// prefix of another (e.g. "1" vs "1,1") sorts first.
+// e.g. "1" < "1,1" < "1,2" < "1,2,1" < "1,10" < "2"
 function compareLabels(a, b) {
-    var depthDiff = a.split(',').length - b.split(',').length;
-    if (depthDiff !== 0) return depthDiff;
-    return a < b ? -1 : (a > b ? 1 : 0);
+    var as = a.split(',');
+    var bs = b.split(',');
+    var len = Math.min(as.length, bs.length);
+    for (var i = 0; i < len; i++) {
+        var an = parseInt(as[i], 10);
+        var bn = parseInt(bs[i], 10);
+        if (!isNaN(an) && !isNaN(bn) && an !== bn) return an - bn;
+        if (as[i] !== bs[i]) return as[i] < bs[i] ? -1 : 1;
+    }
+    return as.length - bs.length;
 }
 
 function getUsedLabels() {
