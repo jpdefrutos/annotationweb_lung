@@ -94,6 +94,17 @@ function setupSegmentation() {
         redrawSequence();
     });
 
+    // Ctrl+C: copy current frame's boxes to the next frame
+    $(document).keydown(function(e) {
+        if (e.ctrlKey && e.which === 67) {
+            var tag = e.target.tagName;
+            if (tag === 'INPUT' || tag === 'TEXTAREA') // Don't hijack normal text copy (e.g. boxLabel field)
+                return;
+            e.preventDefault();
+            copyToNext();
+        }
+    });
+
     try { redrawSequence(); } catch(e) {}
 }
 
