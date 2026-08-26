@@ -138,6 +138,10 @@ function setupSegmentation() {
         updateBoxLabelEditability();
     });
 
+    $('#renameLabelButton').click(function() {
+        renameSelectedLabel();
+    });
+
     rebuildLabelDropdown();
 
     // Ctrl+C: copy current frame's boxes to the next frame
@@ -263,6 +267,74 @@ function updateBoxLabelEditability() {
     var isNewLabel = select.value === '';
     boxLabelInput.readOnly = !isNewLabel;
     boxLabelInput.style.backgroundColor = isNewLabel ? '' : '#eee';
+}
+
+// Renames the label currently selected in the dropdown on every box that has it,
+// across every frame of the current video. If a frame already has a box with the
+// target name, that frame's box is left under the old name to avoid a duplicate.
+function renameSelectedLabel() {
+    var select = document.getElementById('usedLabelsSelect');
+    if (!select) return;
+    var oldLabel = select.value;
+    if (!oldLabel) {
+        alert('Select an existing label to rename (not "New label").');
+        return;
+    }
+
+    var newLabel = prompt('Rename label "' + oldLabel + '" to:', oldLabel);
+    if (newLabel === null) return; // Cancelled
+    newLabel = newLabel.trim();
+    if (!newLabel || newLabel === oldLabel) return;
+
+    var existingCount = 0;
+    for (var fn in g_boxes) {
+        var boxesInFn = g_boxes[fn];
+        for (var bi = 0; bi < boxesInFn.length; bi++) {
+            if (boxesInFn[bi].label === newLabel) existingCount++;
+        }
+    }
+    if (existingCount > 0) {
+        var proceed = confirm(
+            '"' + newLabel + '" is already used on ' + existingCount + ' other box(es) in this video.\n\n' +
+            'Merging is permanent — you won\'t be able to tell old "' + newLabel + '" boxes apart ' +
+            'from the renamed ones afterward.\n\n' +
+            'Tip: if you also want the existing "' + newLabel + '" boxes to become something else, ' +
+            'rename those first.\n\n' +
+            'Continue and merge anyway?'
+        );
+        if (!proceed) return;
+    }
+
+    var newColor = stringToColor(newLabel);
+    var skippedFrames = [];
+    for (var frame_nr in g_boxes) {
+        var boxesInFrame = g_boxes[frame_nr];
+        var targetExists = false;
+        for (var i = 0; i < boxesInFrame.length; i++) {
+            if (boxesInFrame[i].label === newLabel) { targetExists = true; break; }
+        }
+        for (var k = 0; k < boxesInFrame.length; k++) {
+            if (boxesInFrame[k].label !== oldLabel) continue;
+            if (targetExists) {
+                skippedFrames.push(frame_nr);
+                continue;
+            }
+            boxesInFrame[k].label = newLabel;
+            boxesInFrame[k].color = newColor;
+        }
+    }
+
+    g_annotationHasChanged = true;
+    rebuildLabelDropdown();
+    select.value = newLabel;
+    $('#boxLabel').val(newLabel);
+    updateBoxLabelEditability();
+    redrawSequence();
+
+    if (skippedFrames.length > 0) {
+        alert('Renamed everywhere except frame(s) ' + skippedFrames.join(', ') +
+            ', which already had a box labeled "' + newLabel + '". Those were left as "' + oldLabel + '".');
+    }
 }
 
 function clamp(v, lo, hi) {
