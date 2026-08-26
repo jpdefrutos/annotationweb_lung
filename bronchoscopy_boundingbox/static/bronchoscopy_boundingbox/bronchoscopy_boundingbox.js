@@ -15,6 +15,7 @@ var g_currentBox = g_invalidBoxNr;
 var g_cornerSize = 20;
 var g_hoverX = null;
 var g_hoverY = null;
+var g_undoStack = []; // {type: 'add'|'remove', frame_nr, box, index}
 
 function getCurrentLabel() {
     var input = document.getElementById('boxLabel');
@@ -108,9 +109,21 @@ function setupSegmentation() {
         }
     });
 
+    // Ctrl+Z: undo the last added or deleted box
+    $(document).keydown(function(e) {
+        if (e.ctrlKey && e.which === 90) {
+            var tag = e.target.tagName;
+            if (tag === 'INPUT' || tag === 'TEXTAREA')
+                return;
+            e.preventDefault();
+            undoLastBoxAction();
+        }
+    });
+
     $('#clearButton').click(function() {
         g_annotationHasChanged = true;
         g_boxes = {};
+        g_undoStack = [];
         $('#slider').slider('value', g_frameNr);
         redrawSequence();
     });
@@ -149,9 +162,30 @@ function isInsideBox(x, y) {
 }
 
 function removeBox(boxNr) {
-    g_boxes[g_currentFrameNr].splice(boxNr, 1);
+    var frame_nr = g_currentFrameNr;
+    var removed = g_boxes[frame_nr].splice(boxNr, 1)[0];
+    if (removed)
+        g_undoStack.push({type: 'remove', frame_nr: frame_nr, box: removed, index: boxNr});
     g_annotationHasChanged = true;
     redrawSequence();
+}
+
+function undoLastBoxAction() {
+    var action = g_undoStack.pop();
+    if (!action) return;
+    if (!(action.frame_nr in g_boxes))
+        g_boxes[action.frame_nr] = [];
+    if (action.type === 'add') {
+        var idx = g_boxes[action.frame_nr].indexOf(action.box);
+        if (idx !== -1)
+            g_boxes[action.frame_nr].splice(idx, 1);
+    } else if (action.type === 'remove') {
+        var insertAt = Math.min(action.index, g_boxes[action.frame_nr].length);
+        g_boxes[action.frame_nr].splice(insertAt, 0, action.box);
+    }
+    g_annotationHasChanged = true;
+    if (action.frame_nr === g_currentFrameNr)
+        redrawSequence();
 }
 
 function clamp(v, lo, hi) {
@@ -200,6 +234,7 @@ function addBox(frame_nr, x, y, x2, y2, label, color) {
         if (!(frame_nr in g_boxes))
             g_boxes[frame_nr] = [];
         g_boxes[frame_nr].push(box);
+        g_undoStack.push({type: 'add', frame_nr: frame_nr, box: box});
         addKeyFrame(frame_nr);
         redrawSequence();
     }
