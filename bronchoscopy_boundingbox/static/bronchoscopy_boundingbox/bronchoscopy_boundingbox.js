@@ -13,6 +13,8 @@ var g_resize = false;
 var g_invalidBoxNr = 999999;
 var g_currentBox = g_invalidBoxNr;
 var g_cornerSize = 20;
+var g_hoverX = null;
+var g_hoverY = null;
 
 function getCurrentLabel() {
     var input = document.getElementById('boxLabel');
@@ -43,6 +45,8 @@ function setupSegmentation() {
 
     $('#canvas').mousemove(function(e) {
         var pos = mousePos(e, this);
+        g_hoverX = pos.x;
+        g_hoverY = pos.y;
         if (g_paint) {
             g_BBx2 = pos.x;
             g_BBy2 = pos.y;
@@ -78,6 +82,8 @@ function setupSegmentation() {
             redrawSequence();
             g_paint = false;
         }
+        g_hoverX = null;
+        g_hoverY = null;
     });
 
     $('#canvas').dblclick(function(e) {
@@ -85,6 +91,21 @@ function setupSegmentation() {
         var inside = isInsideBox(pos.x, pos.y);
         if (inside.isInside)
             removeBox(inside.boxNr);
+    });
+
+    // Ctrl+D: delete the box under the mouse pointer (alternative to double-click)
+    $(document).keydown(function(e) {
+        if (e.ctrlKey && e.which === 68) {
+            var tag = e.target.tagName;
+            if (tag === 'INPUT' || tag === 'TEXTAREA')
+                return;
+            e.preventDefault();
+            if (g_hoverX === null || g_hoverY === null)
+                return;
+            var inside = isInsideBox(g_hoverX, g_hoverY);
+            if (inside.isInside)
+                removeBox(inside.boxNr);
+        }
     });
 
     $('#clearButton').click(function() {
