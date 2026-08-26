@@ -126,7 +126,19 @@ function setupSegmentation() {
         g_undoStack = [];
         $('#slider').slider('value', g_frameNr);
         redrawSequence();
+        rebuildLabelDropdown();
     });
+
+    // Selecting an existing label loads it into the Box label field (read-only, to
+    // prevent accidental typos creating a near-duplicate label). Selecting "New label"
+    // clears the field and makes it editable again.
+    $('#usedLabelsSelect').change(function() {
+        var val = $(this).val();
+        $('#boxLabel').val(val);
+        updateBoxLabelEditability();
+    });
+
+    rebuildLabelDropdown();
 
     // Ctrl+C: copy current frame's boxes to the next frame
     $(document).keydown(function(e) {
@@ -168,6 +180,7 @@ function removeBox(boxNr) {
         g_undoStack.push({type: 'remove', frame_nr: frame_nr, box: removed, index: boxNr});
     g_annotationHasChanged = true;
     redrawSequence();
+    rebuildLabelDropdown();
 }
 
 function undoLastBoxAction() {
@@ -186,6 +199,70 @@ function undoLastBoxAction() {
     g_annotationHasChanged = true;
     if (action.frame_nr === g_currentFrameNr)
         redrawSequence();
+    rebuildLabelDropdown();
+}
+
+// Sort by hierarchy depth (comma-separated segment count) first, then alphabetically
+// e.g. "1" < "1,1" < "1,2" < "1,1,1" < "1,2,1"
+function compareLabels(a, b) {
+    var depthDiff = a.split(',').length - b.split(',').length;
+    if (depthDiff !== 0) return depthDiff;
+    return a < b ? -1 : (a > b ? 1 : 0);
+}
+
+function getUsedLabels() {
+    var seen = {};
+    for (var frame_nr in g_boxes) {
+        var boxesInFrame = g_boxes[frame_nr];
+        for (var i = 0; i < boxesInFrame.length; i++) {
+            if (boxesInFrame[i].label)
+                seen[boxesInFrame[i].label] = true;
+        }
+    }
+    return Object.keys(seen).sort(compareLabels);
+}
+
+function rebuildLabelDropdown() {
+    var select = document.getElementById('usedLabelsSelect');
+    if (!select) return;
+    var currentValue = select.value;
+    var labels = getUsedLabels();
+
+    select.innerHTML = '';
+    var newLabelOption = document.createElement('option');
+    newLabelOption.value = '';
+    newLabelOption.textContent = 'New label';
+    select.appendChild(newLabelOption);
+
+    for (var i = 0; i < labels.length; i++) {
+        var option = document.createElement('option');
+        option.value = labels[i];
+        option.textContent = labels[i];
+        select.appendChild(option);
+    }
+
+    var stillValid = labels.indexOf(currentValue) !== -1;
+    select.value = stillValid ? currentValue : '';
+
+    // If the previously selected label no longer exists (e.g. its last box was
+    // deleted/undone), fall back to "New label" and clear the now-stale text.
+    if (currentValue && !stillValid) {
+        var boxLabelInput = document.getElementById('boxLabel');
+        if (boxLabelInput) boxLabelInput.value = '';
+    }
+
+    updateBoxLabelEditability();
+}
+
+// Only "New label" allows free typing; an existing label picked from the dropdown
+// is read-only, to avoid a typo silently creating a near-duplicate label.
+function updateBoxLabelEditability() {
+    var select = document.getElementById('usedLabelsSelect');
+    var boxLabelInput = document.getElementById('boxLabel');
+    if (!select || !boxLabelInput) return;
+    var isNewLabel = select.value === '';
+    boxLabelInput.readOnly = !isNewLabel;
+    boxLabelInput.style.backgroundColor = isNewLabel ? '' : '#eee';
 }
 
 function clamp(v, lo, hi) {
@@ -237,6 +314,7 @@ function addBox(frame_nr, x, y, x2, y2, label, color) {
         g_undoStack.push({type: 'add', frame_nr: frame_nr, box: box});
         addKeyFrame(frame_nr);
         redrawSequence();
+        rebuildLabelDropdown();
     }
 }
 
