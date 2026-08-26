@@ -10,6 +10,9 @@
 
 {% block task_javascript %}
 
+$('#clearButton').hide();
+$('#rejectButton').hide();
+
 g_subsequenceLabels = {{ frame_labels_json|safe }};
 
 {% for box in boxes %}
