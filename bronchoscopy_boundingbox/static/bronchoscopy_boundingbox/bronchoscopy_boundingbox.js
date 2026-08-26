@@ -16,6 +16,7 @@ var g_cornerSize = 20;
 var g_hoverX = null;
 var g_hoverY = null;
 var g_undoStack = []; // {type: 'add'|'remove', frame_nr, box, index}
+var g_hydrationBoxes = []; // Saved boxes from the server, applied once real canvas size is known
 
 function getCurrentLabel() {
     var input = document.getElementById('boxLabel');
@@ -464,6 +465,19 @@ function loadBBTask(image_sequence_id) {
     g_backgroundImage.onload = function() {
         g_canvasWidth = this.width;
         g_canvasHeight = this.height;
+
+        // Hydrate saved boxes now that the real canvas size is known. Doing this
+        // earlier (e.g. synchronously at page load) would clamp coordinates against
+        // the 512x512 default in createBox(), collapsing/mispositioning any box
+        // outside that range.
+        for (var i = 0; i < g_hydrationBoxes.length; i++) {
+            var b = g_hydrationBoxes[i];
+            try {
+                addBox(b.frame_nr, b.x, b.y, b.x + b.width, b.y + b.height, b.label);
+            } catch (e) {}
+        }
+        g_hydrationBoxes = [];
+
         // Snap to the first key frame before setting up mouse handlers.
         // loadSequence sets g_currentFrameNr=0 because g_targetFrames is empty
         // at that point in its code; addKeyFrame runs later, so we correct it here.

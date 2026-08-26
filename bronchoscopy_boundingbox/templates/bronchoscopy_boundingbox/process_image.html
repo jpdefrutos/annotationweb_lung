@@ -15,9 +15,14 @@ $('#rejectButton').hide();
 
 g_subsequenceLabels = {{ frame_labels_json|safe }};
 
+// Saved boxes are applied once loadBBTask() knows the real canvas size (see
+// bronchoscopy_boundingbox.js) rather than immediately here, to avoid corrupting
+// their coordinates against the default 512x512 canvas size.
+g_hydrationBoxes = [
 {% for box in boxes %}
-addBox({{ box.image.frame_nr }}, {{ box.x }}, {{ box.y }}, {{ box.x }} + {{ box.width }}, {{ box.y }} + {{ box.height }}, '{{ box.label|escapejs }}');
+    {frame_nr: {{ box.image.frame_nr }}, x: {{ box.x }}, y: {{ box.y }}, width: {{ box.width }}, height: {{ box.height }}, label: '{{ box.label|escapejs }}'},
 {% endfor %}
+];
 
 {% if image_sequence %}
 loadBBTask({{ image_sequence.id }});
