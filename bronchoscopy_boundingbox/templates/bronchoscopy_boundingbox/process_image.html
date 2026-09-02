@@ -6,6 +6,14 @@
     <input type="text" id="boxLabel" placeholder="Enter label"
            style="width: 100%; margin-top: 4px; padding: 4px 6px; box-sizing: border-box;">
 </div>
+<div style="margin-bottom: 8px;">
+    <label for="usedLabelsSelect"><strong>Used labels:</strong></label>
+    <select id="usedLabelsSelect" style="width: 100%; margin-top: 4px; padding: 4px 6px; box-sizing: border-box;">
+        <option value="">New label</option>
+    </select>
+    <button type="button" id="renameLabelButton" style="margin-top: 4px;"
+            title="Rename this label on every box in the current video">Rename label</button>
+</div>
 {% endblock label_buttons %}
 
 {% block task_javascript %}
@@ -37,14 +45,6 @@ loadBBTask({{ image_sequence.id }});
 {% endblock %}
 
 {% block task_content %}
-<div style="margin-top: 6px;">
-    <label for="usedLabelsSelect"><strong>Used labels:</strong></label>
-    <select id="usedLabelsSelect" style="width: 100%; margin-top: 4px; padding: 4px 6px; box-sizing: border-box;">
-        <option value="">New label</option>
-    </select>
-    <button type="button" id="renameLabelButton" style="margin-top: 4px;"
-            title="Rename this label on every box in the current video">Rename label</button>
-</div>
 <div style="margin-top: 6px;">
     <strong>Current branch:</strong> <span id="subsequenceLabel">N/A</span>
 </div>
