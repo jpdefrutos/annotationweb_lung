@@ -121,9 +121,10 @@ class Task(models.Model):
             return round(self.number_of_annotated_images * 100 / self.total_number_of_images, 1)
 
     def get_label_dictionary(self, as_hex=False):
-        if as_hex:
-            return {label.name: label.get_hex_code() for label in self.label.all()}
-        return {label.name: label for label in self.label.all()}
+        return {
+            label.name: label.get_hex_code() if as_hex else label
+            for label in self.label.all()
+        }
 
 
 class ImageSequence(models.Model):
