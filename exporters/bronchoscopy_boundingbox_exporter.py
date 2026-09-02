@@ -42,10 +42,7 @@ class BronchoscopyBoundingBoxExporter(Exporter):
 
         create_folder(path)
 
-        label_colors = {
-            label.name: '#%02x%02x%02x' % (label.color_red, label.color_green, label.color_blue)
-            for label in self.task.label.all()
-        }
+        label_colors = self.task.get_label_dictionary(as_hex=True)
 
         csv_path = join(path, 'annotations.csv')
         with open(csv_path, 'w', newline='') as csvfile:
