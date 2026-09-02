@@ -6,15 +6,31 @@
     <input type="text" id="boxLabel" placeholder="Enter label"
            style="width: 100%; margin-top: 4px; padding: 4px 6px; box-sizing: border-box;">
 </div>
+<div style="margin-bottom: 8px;">
+    <label for="usedLabelsSelect"><strong>Used labels:</strong></label>
+    <select id="usedLabelsSelect" style="width: 100%; margin-top: 4px; padding: 4px 6px; box-sizing: border-box;">
+        <option value="">New label</option>
+    </select>
+    <button type="button" id="renameLabelButton" style="margin-top: 4px;"
+            title="Rename this label on every box in the current video">Rename label</button>
+</div>
 {% endblock label_buttons %}
 
 {% block task_javascript %}
 
+$('#clearButton').hide();
+$('#rejectButton').hide();
+
 g_subsequenceLabels = {{ frame_labels_json|safe }};
 
+// Saved boxes are applied once loadBBTask() knows the real canvas size (see
+// bronchoscopy_boundingbox.js) rather than immediately here, to avoid corrupting
+// their coordinates against the default 512x512 canvas size.
+g_hydrationBoxes = [
 {% for box in boxes %}
-addBox({{ box.image.frame_nr }}, {{ box.x }}, {{ box.y }}, {{ box.x }} + {{ box.width }}, {{ box.y }} + {{ box.height }}, '{{ box.label|escapejs }}');
+    {frame_nr: {{ box.image.frame_nr }}, x: {{ box.x }}, y: {{ box.y }}, width: {{ box.width }}, height: {{ box.height }}, label: '{{ box.label|escapejs }}'},
 {% endfor %}
+];
 
 {% if image_sequence %}
 loadBBTask({{ image_sequence.id }});
@@ -24,7 +40,7 @@ loadBBTask({{ image_sequence.id }});
 
 {% block CopyContentButton %}
 <div id="CopyContentButton">
-    <button type="button" onclick="copyToNext()">Copy to next frame</button>
+    <button type="button" onclick="copyToNext()" title="Ctrl+C">Copy to next frame (Ctrl+C)</button>
 </div>
 {% endblock %}
 

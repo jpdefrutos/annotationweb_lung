@@ -13,6 +13,10 @@ var g_resize = false;
 var g_invalidBoxNr = 999999;
 var g_currentBox = g_invalidBoxNr;
 var g_cornerSize = 20;
+var g_hoverX = null;
+var g_hoverY = null;
+var g_undoStack = []; // {type: 'add'|'remove', frame_nr, box, index}
+var g_hydrationBoxes = []; // Saved boxes from the server, applied once real canvas size is known
 
 function getCurrentLabel() {
     var input = document.getElementById('boxLabel');
@@ -43,6 +47,8 @@ function setupSegmentation() {
 
     $('#canvas').mousemove(function(e) {
         var pos = mousePos(e, this);
+        g_hoverX = pos.x;
+        g_hoverY = pos.y;
         if (g_paint) {
             g_BBx2 = pos.x;
             g_BBy2 = pos.y;
@@ -78,6 +84,8 @@ function setupSegmentation() {
             redrawSequence();
             g_paint = false;
         }
+        g_hoverX = null;
+        g_hoverY = null;
     });
 
     $('#canvas').dblclick(function(e) {
@@ -87,11 +95,65 @@ function setupSegmentation() {
             removeBox(inside.boxNr);
     });
 
+    // Ctrl+D: delete the box under the mouse pointer (alternative to double-click)
+    $(document).keydown(function(e) {
+        if (e.ctrlKey && e.which === 68) {
+            var tag = e.target.tagName;
+            if (tag === 'INPUT' || tag === 'TEXTAREA')
+                return;
+            e.preventDefault();
+            if (g_hoverX === null || g_hoverY === null)
+                return;
+            var inside = isInsideBox(g_hoverX, g_hoverY);
+            if (inside.isInside)
+                removeBox(inside.boxNr);
+        }
+    });
+
+    // Ctrl+Z: undo the last added or deleted box
+    $(document).keydown(function(e) {
+        if (e.ctrlKey && e.which === 90) {
+            var tag = e.target.tagName;
+            if (tag === 'INPUT' || tag === 'TEXTAREA')
+                return;
+            e.preventDefault();
+            undoLastBoxAction();
+        }
+    });
+
     $('#clearButton').click(function() {
         g_annotationHasChanged = true;
         g_boxes = {};
+        g_undoStack = [];
         $('#slider').slider('value', g_frameNr);
         redrawSequence();
+        rebuildLabelDropdown();
+    });
+
+    // Selecting an existing label loads it into the Box label field (read-only, to
+    // prevent accidental typos creating a near-duplicate label). Selecting "New label"
+    // clears the field and makes it editable again.
+    $('#usedLabelsSelect').change(function() {
+        var val = $(this).val();
+        $('#boxLabel').val(val);
+        updateBoxLabelEditability();
+    });
+
+    $('#renameLabelButton').click(function() {
+        renameSelectedLabel();
+    });
+
+    rebuildLabelDropdown();
+
+    // Ctrl+C: copy current frame's boxes to the next frame
+    $(document).keydown(function(e) {
+        if (e.ctrlKey && e.which === 67) {
+            var tag = e.target.tagName;
+            if (tag === 'INPUT' || tag === 'TEXTAREA') // Don't hijack normal text copy (e.g. boxLabel field)
+                return;
+            e.preventDefault();
+            copyToNext();
+        }
     });
 
     try { redrawSequence(); } catch(e) {}
@@ -117,28 +179,200 @@ function isInsideBox(x, y) {
 }
 
 function removeBox(boxNr) {
-    g_boxes[g_currentFrameNr].splice(boxNr, 1);
+    var frame_nr = g_currentFrameNr;
+    var removed = g_boxes[frame_nr].splice(boxNr, 1)[0];
+    if (removed)
+        g_undoStack.push({type: 'remove', frame_nr: frame_nr, box: removed, index: boxNr});
     g_annotationHasChanged = true;
     redrawSequence();
+    rebuildLabelDropdown();
+}
+
+function undoLastBoxAction() {
+    var action = g_undoStack.pop();
+    if (!action) return;
+    if (!(action.frame_nr in g_boxes))
+        g_boxes[action.frame_nr] = [];
+    if (action.type === 'add') {
+        var idx = g_boxes[action.frame_nr].indexOf(action.box);
+        if (idx !== -1)
+            g_boxes[action.frame_nr].splice(idx, 1);
+    } else if (action.type === 'remove') {
+        var insertAt = Math.min(action.index, g_boxes[action.frame_nr].length);
+        g_boxes[action.frame_nr].splice(insertAt, 0, action.box);
+    }
+    g_annotationHasChanged = true;
+    if (action.frame_nr === g_currentFrameNr)
+        redrawSequence();
+    rebuildLabelDropdown();
+}
+
+// Numeric-alphabetical sort of comma-separated segments, compared segment by
+// segment as numbers rather than as plain strings, so e.g. "1,2" < "1,10"
+// (a plain string compare would put "1,10" first). A label that is an exact
+// prefix of another (e.g. "1" vs "1,1") sorts first.
+// e.g. "1" < "1,1" < "1,2" < "1,2,1" < "1,10" < "2"
+function compareLabels(a, b) {
+    var as = a.split(',');
+    var bs = b.split(',');
+    var len = Math.min(as.length, bs.length);
+    for (var i = 0; i < len; i++) {
+        var an = parseInt(as[i], 10);
+        var bn = parseInt(bs[i], 10);
+        if (!isNaN(an) && !isNaN(bn) && an !== bn) return an - bn;
+        if (as[i] !== bs[i]) return as[i] < bs[i] ? -1 : 1;
+    }
+    return as.length - bs.length;
+}
+
+function getUsedLabels() {
+    var seen = {};
+    for (var frame_nr in g_boxes) {
+        var boxesInFrame = g_boxes[frame_nr];
+        for (var i = 0; i < boxesInFrame.length; i++) {
+            if (boxesInFrame[i].label)
+                seen[boxesInFrame[i].label] = true;
+        }
+    }
+    return Object.keys(seen).sort(compareLabels);
+}
+
+function rebuildLabelDropdown() {
+    var select = document.getElementById('usedLabelsSelect');
+    if (!select) return;
+    var currentValue = select.value;
+    var labels = getUsedLabels();
+
+    select.innerHTML = '';
+    var newLabelOption = document.createElement('option');
+    newLabelOption.value = '';
+    newLabelOption.textContent = 'New label';
+    select.appendChild(newLabelOption);
+
+    for (var i = 0; i < labels.length; i++) {
+        var option = document.createElement('option');
+        option.value = labels[i];
+        option.textContent = labels[i];
+        select.appendChild(option);
+    }
+
+    var stillValid = labels.indexOf(currentValue) !== -1;
+    select.value = stillValid ? currentValue : '';
+
+    // If the previously selected label no longer exists (e.g. its last box was
+    // deleted/undone), fall back to "New label" and clear the now-stale text.
+    if (currentValue && !stillValid) {
+        var boxLabelInput = document.getElementById('boxLabel');
+        if (boxLabelInput) boxLabelInput.value = '';
+    }
+
+    updateBoxLabelEditability();
+}
+
+// Only "New label" allows free typing; an existing label picked from the dropdown
+// is read-only, to avoid a typo silently creating a near-duplicate label.
+function updateBoxLabelEditability() {
+    var select = document.getElementById('usedLabelsSelect');
+    var boxLabelInput = document.getElementById('boxLabel');
+    if (!select || !boxLabelInput) return;
+    var isNewLabel = select.value === '';
+    boxLabelInput.readOnly = !isNewLabel;
+    boxLabelInput.style.backgroundColor = isNewLabel ? '' : '#eee';
+}
+
+// Renames the label currently selected in the dropdown on every box that has it,
+// across every frame of the current video. If a frame already has a box with the
+// target name, that frame's box is left under the old name to avoid a duplicate.
+function renameSelectedLabel() {
+    var select = document.getElementById('usedLabelsSelect');
+    if (!select) return;
+    var oldLabel = select.value;
+    if (!oldLabel) {
+        alert('Select an existing label to rename (not "New label").');
+        return;
+    }
+
+    var newLabel = prompt('Rename label "' + oldLabel + '" to:', oldLabel);
+    if (newLabel === null) return; // Cancelled
+    newLabel = newLabel.trim();
+    if (!newLabel || newLabel === oldLabel) return;
+
+    var existingCount = 0;
+    for (var fn in g_boxes) {
+        var boxesInFn = g_boxes[fn];
+        for (var bi = 0; bi < boxesInFn.length; bi++) {
+            if (boxesInFn[bi].label === newLabel) existingCount++;
+        }
+    }
+    if (existingCount > 0) {
+        var proceed = confirm(
+            '"' + newLabel + '" is already used on ' + existingCount + ' other box(es) in this video.\n\n' +
+            'Merging is permanent — you won\'t be able to tell old "' + newLabel + '" boxes apart ' +
+            'from the renamed ones afterward.\n\n' +
+            'Tip: if you also want the existing "' + newLabel + '" boxes to become something else, ' +
+            'rename those first.\n\n' +
+            'Continue and merge anyway?'
+        );
+        if (!proceed) return;
+    }
+
+    var newColor = stringToColor(newLabel);
+    var skippedFrames = [];
+    for (var frame_nr in g_boxes) {
+        var boxesInFrame = g_boxes[frame_nr];
+        var targetExists = false;
+        for (var i = 0; i < boxesInFrame.length; i++) {
+            if (boxesInFrame[i].label === newLabel) { targetExists = true; break; }
+        }
+        for (var k = 0; k < boxesInFrame.length; k++) {
+            if (boxesInFrame[k].label !== oldLabel) continue;
+            if (targetExists) {
+                skippedFrames.push(frame_nr);
+                continue;
+            }
+            boxesInFrame[k].label = newLabel;
+            boxesInFrame[k].color = newColor;
+        }
+    }
+
+    g_annotationHasChanged = true;
+    rebuildLabelDropdown();
+    select.value = newLabel;
+    $('#boxLabel').val(newLabel);
+    updateBoxLabelEditability();
+    redrawSequence();
+
+    if (skippedFrames.length > 0) {
+        alert('Renamed everywhere except frame(s) ' + skippedFrames.join(', ') +
+            ', which already had a box labeled "' + newLabel + '". Those were left as "' + oldLabel + '".');
+    }
+}
+
+function clamp(v, lo, hi) {
+    return Math.max(lo, Math.min(v, hi));
 }
 
 function moveBox(boxNr, xDiff, yDiff) {
     var box = g_boxes[g_currentFrameNr][boxNr];
-    box.x += xDiff;
-    box.y += yDiff;
+    box.x = clamp(box.x + xDiff, 0, g_canvasWidth - box.width);
+    box.y = clamp(box.y + yDiff, 0, g_canvasHeight - box.height);
     redrawSequence();
 }
 
 function resizeBox(boxNr, xDiff, yDiff) {
     var box = g_boxes[g_currentFrameNr][boxNr];
     if (box.width > -xDiff + g_minimumSize)
-        box.width += xDiff;
+        box.width = clamp(box.width + xDiff, g_minimumSize, g_canvasWidth - box.x);
     if (box.height > -yDiff + g_minimumSize)
-        box.height += yDiff;
+        box.height = clamp(box.height + yDiff, g_minimumSize, g_canvasHeight - box.y);
     redrawSequence();
 }
 
 function createBox(x, y, x2, y2, label, color) {
+    x = clamp(x, 0, g_canvasWidth);
+    y = clamp(y, 0, g_canvasHeight);
+    x2 = clamp(x2, 0, g_canvasWidth);
+    y2 = clamp(y2, 0, g_canvasHeight);
     var originX = Math.min(x, x2);
     var originY = Math.min(y, y2);
     return {
@@ -160,8 +394,10 @@ function addBox(frame_nr, x, y, x2, y2, label, color) {
         if (!(frame_nr in g_boxes))
             g_boxes[frame_nr] = [];
         g_boxes[frame_nr].push(box);
+        g_undoStack.push({type: 'add', frame_nr: frame_nr, box: box});
         addKeyFrame(frame_nr);
         redrawSequence();
+        rebuildLabelDropdown();
     }
 }
 
@@ -239,6 +475,19 @@ function loadBBTask(image_sequence_id) {
     g_backgroundImage.onload = function() {
         g_canvasWidth = this.width;
         g_canvasHeight = this.height;
+
+        // Hydrate saved boxes now that the real canvas size is known. Doing this
+        // earlier (e.g. synchronously at page load) would clamp coordinates against
+        // the 512x512 default in createBox(), collapsing/mispositioning any box
+        // outside that range.
+        for (var i = 0; i < g_hydrationBoxes.length; i++) {
+            var b = g_hydrationBoxes[i];
+            try {
+                addBox(b.frame_nr, b.x, b.y, b.x + b.width, b.y + b.height, b.label);
+            } catch (e) {}
+        }
+        g_hydrationBoxes = [];
+
         // Snap to the first key frame before setting up mouse handlers.
         // loadSequence sets g_currentFrameNr=0 because g_targetFrames is empty
         // at that point in its code; addKeyFrame runs later, so we correct it here.

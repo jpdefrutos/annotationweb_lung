@@ -171,15 +171,17 @@ def save_labels(request):
                     # Save custom label if present
                     custom_label = custom_frame_labels.get(str(annotation.frame_nr))
                     if custom_label:
-                        label, created = Label.objects.get_or_create(
-                            name=custom_label,
-                            #task=annotation.image_annotation.task,
-                            defaults={'color_red': 128, 'color_green': 128, 'color_blue': 128}
-                        )
+                        task = annotation.image_annotation.task
+                        label = task.label.filter(name=custom_label).first()
+                        if not label:
+                            label = Label.objects.create(
+                                name=custom_label,
+                                color_red=128, color_green=128, color_blue=128
+                            )
+                            task.label.add(label)
                         sublabel = SubsequenceLabel.objects.create(
                             image=annotation,
                             label=label,
-                            #task=annotation.image_annotation.task
                         )
                         print(f"Created SubsequenceLabel for custom label id={sublabel.id}")
                 # Save custom labels for frames not in annotations
@@ -195,15 +197,17 @@ def save_labels(request):
                             image_annotation=image_annotation,
                             frame_nr=frame_nr
                         )
-                        label, created = Label.objects.get_or_create(
-                            name=custom_label,
-                            #task=annotation.image_annotation.task,
-                            defaults={'color_red': 0, 'color_green': 255, 'color_blue': 0}
-                        )
+                        task = image_annotation.task
+                        label = task.label.filter(name=custom_label).first()
+                        if not label:
+                            label = Label.objects.create(
+                                name=custom_label,
+                                color_red=0, color_green=255, color_blue=0
+                            )
+                            task.label.add(label)
                         sublabel = SubsequenceLabel.objects.create(
                             image=annotation,
                             label=label,
-                            #task=annotation.image_annotation.task
                         )
                         print(f"Created SubsequenceLabel for custom label id={sublabel.id}")
             response = {

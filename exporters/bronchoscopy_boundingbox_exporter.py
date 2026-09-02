@@ -42,6 +42,8 @@ class BronchoscopyBoundingBoxExporter(Exporter):
 
         create_folder(path)
 
+        label_colors = self.task.get_label_dictionary(as_hex=True)
+
         csv_path = join(path, 'annotations.csv')
         with open(csv_path, 'w', newline='') as csvfile:
             writer = csv.writer(csvfile)
@@ -66,7 +68,7 @@ class BronchoscopyBoundingBoxExporter(Exporter):
                             box.y,
                             box.width,
                             box.height,
-                            box.color,
+                            label_colors.get(box.label, ''),
                         ])
 
                     # Copy the annotated frame image

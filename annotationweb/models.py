@@ -38,6 +38,9 @@ class Label(models.Model):
     def __str__(self):
         return self.name
 
+    def get_hex_code(self):
+        return '#%02x%02x%02x' % (self.color_red, self.color_green, self.color_blue)
+
 
 class Task(models.Model):
     CLASSIFICATION = 'classification'
@@ -116,6 +119,12 @@ class Task(models.Model):
             return 0
         else:
             return round(self.number_of_annotated_images * 100 / self.total_number_of_images, 1)
+
+    def get_label_dictionary(self, as_hex=False):
+        return {
+            label.name: label.get_hex_code() if as_hex else label
+            for label in self.label.all()
+        }
 
 
 class ImageSequence(models.Model):
