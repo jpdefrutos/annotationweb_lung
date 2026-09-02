@@ -102,7 +102,7 @@ hr {
 
 #saveButton {
     font-size:28px;
-    line-height:0px;
+    line-height:1;
     background-color: #6ea869;
 }
 
@@ -138,7 +138,7 @@ hr {
 
 #imageListButton{
     font-size:28px;
-    line-height:0px;
+    line-height:1;
 }
 
 #imageListButton:before{
