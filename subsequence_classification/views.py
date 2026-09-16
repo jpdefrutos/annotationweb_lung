@@ -36,6 +36,10 @@ def label_subsequence(request, task_id, image_id):
         # Load labels
         context['labels'] = Label.objects.filter(task=task_id)
         context['toplabels'] = Label.objects.filter(task=task_id, parent=None)
+        # A task is in "textbox" mode if it was configured with a top-level label named
+        # "textbox". Custom labels typed in by annotators are also saved as top-level
+        # labels on the task, so this must not be based on how many top labels exist.
+        context['is_textbox_mode'] = context['toplabels'].filter(name__iexact='textbox').exists()
         # Get the sequence
         sequence = context.get("image_sequence")
 

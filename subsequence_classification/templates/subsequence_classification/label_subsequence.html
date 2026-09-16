@@ -112,7 +112,15 @@
     </div>
 {%  endif %}
 
-    {% if toplabels|length > 1 %}
+    {% if is_textbox_mode %}
+    <div>
+        <label for="customLabelInput">Enter label:</label>
+        <input type="text" id="customLabelInput" placeholder="Type label here">
+    </div>
+
+    <h3>Mark subsequence </h3>
+
+    {% elif toplabels|length > 1 %}
     <h3>Labels</h3>
 
 
@@ -162,14 +170,6 @@
         {% endblock label_buttons %}
     </div>
 
-
-    {% elif toplabels|length == 1 and toplabels.0.name|lower == 'textbox' %}
-    <div>
-        <label for="customLabelInput">Enter label:</label>
-        <input type="text" id="customLabelInput" placeholder="Type label here">
-    </div>
-
-    <h3>Mark subsequence </h3>
 
     {% else %} <!-- Only one top label -->
     <h3>Mark subsequence with label: {{ toplabels.0.name }}</h3>
