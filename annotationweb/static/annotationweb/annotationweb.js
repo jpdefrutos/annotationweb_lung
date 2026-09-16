@@ -408,8 +408,16 @@ function loadSequence(image_sequence_id, start_frame, nrOfFrames, show_entire_se
         image.onload = function() {
             g_canvasWidth = this.width;
             g_canvasHeight = this.height;
-            canvas.setAttribute('width', g_canvasWidth);
-            canvas.setAttribute('height', g_canvasHeight);
+            // Setting the width/height attribute clears the canvas bitmap even when
+            // the value is unchanged, so only touch it when the size actually
+            // changes. Every frame in a sequence loads with the same dimensions, so
+            // without this guard, each one of potentially hundreds/thousands of
+            // images finishing loading in the background would wipe out whatever
+            // was just drawn on the canvas.
+            if (canvas.width !== g_canvasWidth || canvas.height !== g_canvasHeight) {
+                canvas.setAttribute('width', g_canvasWidth);
+                canvas.setAttribute('height', g_canvasHeight);
+            }
 
             // Update progressbar
             g_framesLoaded++;
