@@ -17,6 +17,7 @@ var g_hoverX = null;
 var g_hoverY = null;
 var g_undoStack = []; // {type: 'add'|'remove', frame_nr, box, index}
 var g_hydrationBoxes = []; // Saved boxes from the server, applied once real canvas size is known
+var g_boxClipboard = []; // Boxes saved via copyAllBoxes(), for pasting onto a non-adjacent frame
 
 function getCurrentLabel() {
     var input = document.getElementById('boxLabel');
@@ -157,6 +158,23 @@ function setupSegmentation() {
                 copyToPrevious();
             else
                 copyToNext();
+        }
+    });
+
+    // Ctrl+Shift+A: copy all boxes on the current frame to the clipboard
+    // Ctrl+Shift+V: paste all boxes from the clipboard onto the current frame
+    // (avoids Alt-based combos: Ctrl+Alt is indistinguishable from AltGr on many
+    // European keyboard layouts and would misfire there)
+    $(document).keydown(function(e) {
+        if (e.ctrlKey && e.shiftKey && (e.which === 65 || e.which === 86)) {
+            var tag = e.target.tagName;
+            if (tag === 'INPUT' || tag === 'TEXTAREA')
+                return;
+            e.preventDefault();
+            if (e.which === 65)
+                copyAllBoxes();
+            else
+                pasteAllBoxes();
         }
     });
 
@@ -501,6 +519,7 @@ function copyToNext() {
                 b.color  // preserve color
             );
         }
+        g_annotationHasChanged = true;
         goToCopiedFrame(nextFrameNr);
     }
 }
@@ -521,8 +540,51 @@ function copyToPrevious() {
                 b.color  // preserve color
             );
         }
+        g_annotationHasChanged = true;
         goToCopiedFrame(previousFrameNr);
     }
+}
+
+function updateBoxClipboardStatus() {
+    var el = document.getElementById('boxClipboardStatus');
+    if (!el) return;
+    el.textContent = g_boxClipboard.length > 0
+        ? 'Clipboard: ' + g_boxClipboard.length + ' box' + (g_boxClipboard.length === 1 ? '' : 'es')
+        : 'Clipboard: empty';
+}
+
+// Copies every box on the current frame into a clipboard that survives jumping
+// to a non-adjacent frame (unlike copyToNext/copyToPrevious), for the case where
+// the same set of boxes needs to reappear several frames later.
+function copyAllBoxes() {
+    var boxes = g_boxes[g_currentFrameNr];
+    if (!boxes || boxes.length === 0) {
+        alert('No boxes on the current frame to copy.');
+        return;
+    }
+    g_boxClipboard = boxes.map(function(b) {
+        return { x: b.x, y: b.y, width: b.width, height: b.height, label: b.label, color: b.color };
+    });
+    updateBoxClipboardStatus();
+}
+
+function pasteAllBoxes() {
+    if (!g_boxClipboard || g_boxClipboard.length === 0) {
+        alert("Clipboard is empty. Use 'Copy all boxes' first.");
+        return;
+    }
+    for (var i = 0; i < g_boxClipboard.length; i++) {
+        var b = g_boxClipboard[i];
+        addBox(
+            g_currentFrameNr,
+            b.x, b.y,
+            b.x + b.width,
+            b.y + b.height,
+            b.label,
+            b.color  // preserve color
+        );
+    }
+    g_annotationHasChanged = true;
 }
 
 function loadBBTask(image_sequence_id) {

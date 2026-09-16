@@ -42,6 +42,11 @@ loadBBTask({{ image_sequence.id }});
 <div id="CopyContentButton">
     <button type="button" onclick="copyToPrevious()" title="Ctrl+Shift+C">Copy to previous frame (Ctrl+Shift+C)</button>
     <button type="button" onclick="copyToNext()" title="Ctrl+C">Copy to next frame (Ctrl+C)</button>
+    <div style="margin-top: 8px;">
+        <button type="button" onclick="copyAllBoxes()" title="Ctrl+Shift+A">Copy all boxes (Ctrl+Shift+A)</button>
+        <button type="button" onclick="pasteAllBoxes()" title="Ctrl+Shift+V">Paste all boxes (Ctrl+Shift+V)</button>
+        <div id="boxClipboardStatus" style="margin-top: 4px; font-size: 0.9em;">Clipboard: empty</div>
+    </div>
 </div>
 {% endblock %}
 
