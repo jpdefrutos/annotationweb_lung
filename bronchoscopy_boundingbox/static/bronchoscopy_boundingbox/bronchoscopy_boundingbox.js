@@ -146,13 +146,17 @@ function setupSegmentation() {
     rebuildLabelDropdown();
 
     // Ctrl+C: copy current frame's boxes to the next frame
+    // Ctrl+Shift+C: copy current frame's boxes to the previous frame
     $(document).keydown(function(e) {
         if (e.ctrlKey && e.which === 67) {
             var tag = e.target.tagName;
             if (tag === 'INPUT' || tag === 'TEXTAREA') // Don't hijack normal text copy (e.g. boxLabel field)
                 return;
             e.preventDefault();
-            copyToNext();
+            if (e.shiftKey)
+                copyToPrevious();
+            else
+                copyToNext();
         }
     });
 
@@ -451,14 +455,45 @@ function redrawSequence() {
     $('#subsequenceLabel').text(label);
 }
 
+// goToFrame() (annotationweb.js) clamps to g_framesLoaded-1, i.e. how many of this
+// sequence's frame images have *finished downloading so far* - not a sequence
+// boundary. On a "show_entire_sequence" task with ~1800 frames, that count lags
+// well behind the real position for a while after page load, so goToFrame() would
+// silently land on whatever frame happened to be loaded instead of the one we just
+// copied to. Navigate directly to the real target frame instead, redrawing once its
+// image has actually finished loading if it hasn't yet.
+function goToCopiedFrame(frameNr) {
+    setPlayButton(false);
+    g_currentFrameNr = frameNr;
+    $('#slider').slider('value', frameNr);
+    $('#currentFrame').text(g_currentFrameNr);
+    var marker_index = g_targetFrames.findIndex(index => index === frameNr);
+    if (marker_index) {
+        g_currentTargetFrameIndex = g_currentFrameNr;
+    } else {
+        g_currentTargetFrameIndex = -1;
+    }
+
+    var img = g_sequence[frameNr - g_startFrame];
+    if (img && img.complete && img.naturalWidth > 0) {
+        redrawSequence();
+    } else if (img) {
+        img.addEventListener('load', function onLoaded() {
+            img.removeEventListener('load', onLoaded);
+            if (g_currentFrameNr === frameNr) redrawSequence();
+        });
+    }
+}
+
 function copyToNext() {
-    if (g_currentFrameNr < g_sequenceLength + 1) {
+    if (g_currentFrameNr < g_startFrame + g_sequenceLength) {
         var boxes_to_copy = g_boxes[g_currentFrameNr];
         if (!boxes_to_copy || boxes_to_copy.length === 0) return;
+        var nextFrameNr = g_currentFrameNr + 1;
         for (var i = 0; i < boxes_to_copy.length; i++) {
             var b = boxes_to_copy[i];
             addBox(
-                g_currentFrameNr + 1,
+                nextFrameNr,
                 b.x, b.y,
                 b.x + b.width,
                 b.y + b.height,
@@ -466,6 +501,27 @@ function copyToNext() {
                 b.color  // preserve color
             );
         }
+        goToCopiedFrame(nextFrameNr);
+    }
+}
+
+function copyToPrevious() {
+    if (g_currentFrameNr > g_startFrame) {
+        var boxes_to_copy = g_boxes[g_currentFrameNr];
+        if (!boxes_to_copy || boxes_to_copy.length === 0) return;
+        var previousFrameNr = g_currentFrameNr - 1;
+        for (var i = 0; i < boxes_to_copy.length; i++) {
+            var b = boxes_to_copy[i];
+            addBox(
+                previousFrameNr,
+                b.x, b.y,
+                b.x + b.width,
+                b.y + b.height,
+                b.label,
+                b.color  // preserve color
+            );
+        }
+        goToCopiedFrame(previousFrameNr);
     }
 }
 
