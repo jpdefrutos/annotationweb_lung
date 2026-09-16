@@ -131,13 +131,17 @@ function setupSegmentation() {
         rebuildLabelDropdown();
     });
 
-    // Selecting an existing label loads it into the Box label field (read-only, to
-    // prevent accidental typos creating a near-duplicate label). Selecting "New label"
-    // clears the field and makes it editable again.
+    // Selecting an existing label loads it into the Box label field so it can be
+    // tweaked (e.g. picking "1,2,1,1" to then edit into "1,2,1,2") rather than
+    // retyped from scratch. Select the text so retyping the differing part is a
+    // single keystroke away.
     $('#usedLabelsSelect').change(function() {
         var val = $(this).val();
-        $('#boxLabel').val(val);
-        updateBoxLabelEditability();
+        if (!val) return;
+        var boxLabelInput = document.getElementById('boxLabel');
+        boxLabelInput.value = val;
+        boxLabelInput.focus();
+        boxLabelInput.select();
     });
 
     $('#renameLabelButton').click(function() {
@@ -259,6 +263,11 @@ function getUsedLabels() {
     return Object.keys(seen).sort(compareLabels);
 }
 
+// The "Used labels" dropdown is just a shortcut to fill in the Box label field
+// (see the change handler above) - it doesn't gate what can be drawn. The Box
+// label field always accepts free text, and drawing a box with a label that
+// hasn't been used before on this video simply creates it, picking up a color
+// from stringToColor() the same way any other new label does.
 function rebuildLabelDropdown() {
     var select = document.getElementById('usedLabelsSelect');
     if (!select) return;
@@ -266,11 +275,6 @@ function rebuildLabelDropdown() {
     var labels = getUsedLabels();
 
     select.innerHTML = '';
-    var newLabelOption = document.createElement('option');
-    newLabelOption.value = '';
-    newLabelOption.textContent = 'New label';
-    select.appendChild(newLabelOption);
-
     for (var i = 0; i < labels.length; i++) {
         var option = document.createElement('option');
         option.value = labels[i];
@@ -278,28 +282,9 @@ function rebuildLabelDropdown() {
         select.appendChild(option);
     }
 
-    var stillValid = labels.indexOf(currentValue) !== -1;
-    select.value = stillValid ? currentValue : '';
-
-    // If the previously selected label no longer exists (e.g. its last box was
-    // deleted/undone), fall back to "New label" and clear the now-stale text.
-    if (currentValue && !stillValid) {
-        var boxLabelInput = document.getElementById('boxLabel');
-        if (boxLabelInput) boxLabelInput.value = '';
+    if (labels.indexOf(currentValue) !== -1) {
+        select.value = currentValue;
     }
-
-    updateBoxLabelEditability();
-}
-
-// Only "New label" allows free typing; an existing label picked from the dropdown
-// is read-only, to avoid a typo silently creating a near-duplicate label.
-function updateBoxLabelEditability() {
-    var select = document.getElementById('usedLabelsSelect');
-    var boxLabelInput = document.getElementById('boxLabel');
-    if (!select || !boxLabelInput) return;
-    var isNewLabel = select.value === '';
-    boxLabelInput.readOnly = !isNewLabel;
-    boxLabelInput.style.backgroundColor = isNewLabel ? '' : '#eee';
 }
 
 // Renames the label currently selected in the dropdown on every box that has it,
@@ -310,7 +295,7 @@ function renameSelectedLabel() {
     if (!select) return;
     var oldLabel = select.value;
     if (!oldLabel) {
-        alert('Select an existing label to rename (not "New label").');
+        alert('Select an existing label to rename.');
         return;
     }
 
@@ -361,7 +346,6 @@ function renameSelectedLabel() {
     rebuildLabelDropdown();
     select.value = newLabel;
     $('#boxLabel').val(newLabel);
-    updateBoxLabelEditability();
     redrawSequence();
 
     if (skippedFrames.length > 0) {
