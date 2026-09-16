@@ -214,6 +214,18 @@ function removeBox(boxNr) {
     rebuildLabelDropdown();
 }
 
+// Deletes every box on the current frame, one at a time via removeBox() so each
+// is pushed onto the undo stack individually - Ctrl+Z undoes them one by one,
+// same as deleting them by hand.
+function deleteAllBoxesInFrame() {
+    var boxes = g_boxes[g_currentFrameNr];
+    if (!boxes || boxes.length === 0) return;
+    if (!confirm('Delete all ' + boxes.length + ' box(es) on this frame?')) return;
+    for (var i = boxes.length - 1; i >= 0; i--) {
+        removeBox(i);
+    }
+}
+
 function undoLastBoxAction() {
     var action = g_undoStack.pop();
     if (!action) return;
