@@ -24,7 +24,51 @@ function getCurrentLabel() {
     return input ? input.value.trim() : '';
 }
 
+// Position clamped to the image bounds, so dragging the mouse past the edge of
+// the frame (which happens often when a box needs to reach the frame's actual
+// edge) still resolves to a position exactly on that edge, instead of requiring
+// the cursor to land on the exact last pixel of the image.
+function clampedMousePos(e, canvas) {
+    var pos = mousePos(e, canvas);
+    pos.x = clamp(pos.x, 0, g_canvasWidth);
+    pos.y = clamp(pos.y, 0, g_canvasHeight);
+    return pos;
+}
+
+function applyDragMove(pos) {
+    if (g_paint) {
+        g_BBx2 = pos.x;
+        g_BBy2 = pos.y;
+        redrawSequence();
+        return;
+    }
+    var xDiff = pos.x - g_BBx;
+    var yDiff = pos.y - g_BBy;
+    g_BBx = pos.x;
+    g_BBy = pos.y;
+    if (g_move) {
+        moveBox(g_currentBox, xDiff, yDiff);
+    } else if (g_resize) {
+        resizeBox(g_currentBox, xDiff, yDiff);
+    }
+}
+
+function finishDrag() {
+    if (g_move || g_resize) {
+        g_move = false;
+        g_resize = false;
+        return;
+    }
+    if (g_paint) {
+        g_paint = false;
+        g_annotationHasChanged = true;
+        addBox(g_currentFrameNr, g_BBx, g_BBy, g_BBx2, g_BBy2, getCurrentLabel());
+    }
+}
+
 function setupSegmentation() {
+    var canvas = document.getElementById('canvas');
+
     $('#canvas').mousedown(function(e) {
         var pos = mousePos(e, this);
         g_BBx = pos.x;
@@ -47,46 +91,44 @@ function setupSegmentation() {
     });
 
     $('#canvas').mousemove(function(e) {
-        var pos = mousePos(e, this);
+        var pos = clampedMousePos(e, this);
         g_hoverX = pos.x;
         g_hoverY = pos.y;
-        if (g_paint) {
-            g_BBx2 = pos.x;
-            g_BBy2 = pos.y;
-            redrawSequence();
-            return;
-        }
-        var xDiff = pos.x - g_BBx;
-        var yDiff = pos.y - g_BBy;
-        g_BBx = pos.x;
-        g_BBy = pos.y;
-        if (g_move) {
-            moveBox(g_currentBox, xDiff, yDiff);
-            return;
-        }
-        if (g_resize) {
-            resizeBox(g_currentBox, xDiff, yDiff);
-        }
+        applyDragMove(pos);
     });
 
     $('#canvas').mouseup(function(e) {
-        g_move = false;
-        g_resize = false;
-        if (!g_paint) return;
-        g_paint = false;
-        g_annotationHasChanged = true;
-        addBox(g_currentFrameNr, g_BBx, g_BBy, g_BBx2, g_BBy2, getCurrentLabel());
+        finishDrag();
     });
 
     $('#canvas').mouseleave(function(e) {
-        if (g_paint) {
-            g_annotationHasChanged = true;
-            addBox(g_currentFrameNr, g_BBx, g_BBy, g_BBx2, g_BBy2, getCurrentLabel());
-            redrawSequence();
-            g_paint = false;
-        }
         g_hoverX = null;
         g_hoverY = null;
+    });
+
+    // The handlers above only fire while the cursor is over the canvas, so
+    // dragging past the edge of the frame would otherwise freeze the box at
+    // whatever position was last inside the canvas. These document-level
+    // fallbacks keep an in-progress paint/move/resize going (clamped to the
+    // image bounds) once the cursor leaves the canvas, and let releasing the
+    // mouse anywhere - not just back over the canvas - end the drag.
+    $(document).mousemove(function(e) {
+        if (e.target === canvas) return; // already handled above
+        if (!g_paint && !g_move && !g_resize) return;
+        applyDragMove(clampedMousePos(e, canvas));
+    });
+
+    $(document).mouseup(function(e) {
+        if (e.target === canvas) return; // already handled above
+        finishDrag();
+    });
+
+    // A drag released outside the browser window (e.g. alt-tab) never fires
+    // mouseup at all; drop it instead of leaving g_paint/g_move/g_resize stuck.
+    $(window).on('blur', function() {
+        g_paint = false;
+        g_move = false;
+        g_resize = false;
     });
 
     $('#canvas').dblclick(function(e) {
