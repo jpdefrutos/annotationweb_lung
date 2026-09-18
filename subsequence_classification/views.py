@@ -7,27 +7,10 @@ from django.http import Http404
 from django.db import transaction
 
 import common.task
+from common.label import get_or_create_task_label
 from .models import *
 from annotationweb.models import Task, ImageAnnotation, KeyFrameAnnotation, Label, TrackingData, SynchronisedTrackingData
 import re
-
-
-def _get_or_create_task_label(task, name, color_rgb):
-    """Find-or-create a task-scoped Label by name.
-
-    Locks the task row first (select_for_update), so two concurrent saves for
-    the same new custom label on the same task serialize instead of both
-    seeing no existing match and each creating a duplicate Label. (No-op on
-    backends without row locking, e.g. SQLite, where it degrades to a plain
-    lookup - same as before.)
-    """
-    Task.objects.select_for_update().get(pk=task.pk)
-    label = task.label.filter(name=name).first()
-    if not label:
-        r, g, b = color_rgb
-        label = Label.objects.create(name=name, color_red=r, color_green=g, color_blue=b)
-        task.label.add(label)
-    return label
 
 
 def label_next_image(request, task_id):
@@ -194,7 +177,7 @@ def save_labels(request):
                     custom_label = custom_frame_labels.get(str(annotation.frame_nr))
                     if custom_label:
                         task = annotation.image_annotation.task
-                        label = _get_or_create_task_label(task, custom_label, (128, 128, 128))
+                        label = get_or_create_task_label(task, custom_label, (128, 128, 128))
                         sublabel = SubsequenceLabel.objects.create(
                             image=annotation,
                             label=label,
@@ -214,7 +197,7 @@ def save_labels(request):
                             frame_nr=frame_nr
                         )
                         task = image_annotation.task
-                        label = _get_or_create_task_label(task, custom_label, (0, 255, 0))
+                        label = get_or_create_task_label(task, custom_label, (0, 255, 0))
                         sublabel = SubsequenceLabel.objects.create(
                             image=annotation,
                             label=label,

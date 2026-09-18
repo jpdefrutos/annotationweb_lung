@@ -556,24 +556,32 @@ function goToCopiedFrame(frameNr) {
     }
 }
 
+// Adds a copy of each given box to targetFrameNr, preserving label/color, and
+// rebuilds the label dropdown once at the end. Shared by copyToNext/
+// copyToPrevious/pasteAllBoxes so a future per-box field only needs to be
+// threaded through in one place instead of three.
+function copyBoxesToFrame(boxes, targetFrameNr) {
+    for (var i = 0; i < boxes.length; i++) {
+        var b = boxes[i];
+        addBox(
+            targetFrameNr,
+            b.x, b.y,
+            b.x + b.width,
+            b.y + b.height,
+            b.label,
+            b.color,  // preserve color
+            true, false
+        );
+    }
+    rebuildLabelDropdown();
+}
+
 function copyToNext() {
     if (g_currentFrameNr < g_startFrame + g_sequenceLength) {
         var boxes_to_copy = g_boxes[g_currentFrameNr];
         if (!boxes_to_copy || boxes_to_copy.length === 0) return;
         var nextFrameNr = g_currentFrameNr + 1;
-        for (var i = 0; i < boxes_to_copy.length; i++) {
-            var b = boxes_to_copy[i];
-            addBox(
-                nextFrameNr,
-                b.x, b.y,
-                b.x + b.width,
-                b.y + b.height,
-                b.label,
-                b.color,  // preserve color
-                true, false
-            );
-        }
-        rebuildLabelDropdown();
+        copyBoxesToFrame(boxes_to_copy, nextFrameNr);
         g_annotationHasChanged = true;
         goToCopiedFrame(nextFrameNr);
     }
@@ -584,19 +592,7 @@ function copyToPrevious() {
         var boxes_to_copy = g_boxes[g_currentFrameNr];
         if (!boxes_to_copy || boxes_to_copy.length === 0) return;
         var previousFrameNr = g_currentFrameNr - 1;
-        for (var i = 0; i < boxes_to_copy.length; i++) {
-            var b = boxes_to_copy[i];
-            addBox(
-                previousFrameNr,
-                b.x, b.y,
-                b.x + b.width,
-                b.y + b.height,
-                b.label,
-                b.color,  // preserve color
-                true, false
-            );
-        }
-        rebuildLabelDropdown();
+        copyBoxesToFrame(boxes_to_copy, previousFrameNr);
         g_annotationHasChanged = true;
         goToCopiedFrame(previousFrameNr);
     }
@@ -630,19 +626,7 @@ function pasteAllBoxes() {
         alert("Clipboard is empty. Use 'Copy all boxes' first.");
         return;
     }
-    for (var i = 0; i < g_boxClipboard.length; i++) {
-        var b = g_boxClipboard[i];
-        addBox(
-            g_currentFrameNr,
-            b.x, b.y,
-            b.x + b.width,
-            b.y + b.height,
-            b.label,
-            b.color,  // preserve color
-            true, false
-        );
-    }
-    rebuildLabelDropdown();
+    copyBoxesToFrame(g_boxClipboard, g_currentFrameNr);
     g_annotationHasChanged = true;
 }
 
