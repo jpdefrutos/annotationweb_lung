@@ -12,6 +12,24 @@ from annotationweb.models import Task, ImageAnnotation, KeyFrameAnnotation, Labe
 import re
 
 
+def _get_or_create_task_label(task, name, color_rgb):
+    """Find-or-create a task-scoped Label by name.
+
+    Locks the task row first (select_for_update), so two concurrent saves for
+    the same new custom label on the same task serialize instead of both
+    seeing no existing match and each creating a duplicate Label. (No-op on
+    backends without row locking, e.g. SQLite, where it degrades to a plain
+    lookup - same as before.)
+    """
+    Task.objects.select_for_update().get(pk=task.pk)
+    label = task.label.filter(name=name).first()
+    if not label:
+        r, g, b = color_rgb
+        label = Label.objects.create(name=name, color_red=r, color_green=g, color_blue=b)
+        task.label.add(label)
+    return label
+
+
 def label_next_image(request, task_id):
     return label_subsequence(request, task_id, None)
 
@@ -176,13 +194,7 @@ def save_labels(request):
                     custom_label = custom_frame_labels.get(str(annotation.frame_nr))
                     if custom_label:
                         task = annotation.image_annotation.task
-                        label = task.label.filter(name=custom_label).first()
-                        if not label:
-                            label = Label.objects.create(
-                                name=custom_label,
-                                color_red=128, color_green=128, color_blue=128
-                            )
-                            task.label.add(label)
+                        label = _get_or_create_task_label(task, custom_label, (128, 128, 128))
                         sublabel = SubsequenceLabel.objects.create(
                             image=annotation,
                             label=label,
@@ -202,13 +214,7 @@ def save_labels(request):
                             frame_nr=frame_nr
                         )
                         task = image_annotation.task
-                        label = task.label.filter(name=custom_label).first()
-                        if not label:
-                            label = Label.objects.create(
-                                name=custom_label,
-                                color_red=0, color_green=255, color_blue=0
-                            )
-                            task.label.add(label)
+                        label = _get_or_create_task_label(task, custom_label, (0, 255, 0))
                         sublabel = SubsequenceLabel.objects.create(
                             image=annotation,
                             label=label,

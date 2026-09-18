@@ -246,26 +246,31 @@ function isInsideBox(x, y) {
     return { isInside: isInside, boxNr: boxNr, isInsideCorner: isInsideCorner };
 }
 
-function removeBox(boxNr) {
+function removeBox(boxNr, updateDropdown) {
+    if (updateDropdown === undefined) updateDropdown = true;
     var frame_nr = g_currentFrameNr;
     var removed = g_boxes[frame_nr].splice(boxNr, 1)[0];
     if (removed)
         g_undoStack.push({type: 'remove', frame_nr: frame_nr, box: removed, index: boxNr});
     g_annotationHasChanged = true;
     redrawSequence();
-    rebuildLabelDropdown();
+    if (updateDropdown)
+        rebuildLabelDropdown();
 }
 
 // Deletes every box on the current frame, one at a time via removeBox() so each
 // is pushed onto the undo stack individually - Ctrl+Z undoes them one by one,
-// same as deleting them by hand.
+// same as deleting them by hand. The dropdown is only rebuilt once at the end
+// rather than after each removal, since rebuildLabelDropdown() rescans every
+// box on every frame and doing that per-box makes bulk deletion quadratic.
 function deleteAllBoxesInFrame() {
     var boxes = g_boxes[g_currentFrameNr];
     if (!boxes || boxes.length === 0) return;
     if (!confirm('Delete all ' + boxes.length + ' box(es) on this frame?')) return;
     for (var i = boxes.length - 1; i >= 0; i--) {
-        removeBox(i);
+        removeBox(i, false);
     }
+    rebuildLabelDropdown();
 }
 
 function undoLastBoxAction() {
@@ -445,7 +450,9 @@ function createBox(x, y, x2, y2, label, color) {
     };
 }
 
-function addBox(frame_nr, x, y, x2, y2, label, color) {
+function addBox(frame_nr, x, y, x2, y2, label, color, recordUndo, updateDropdown) {
+    if (recordUndo === undefined) recordUndo = true;
+    if (updateDropdown === undefined) updateDropdown = true;
     if (Math.abs(x2 - x) > g_minimumSize && Math.abs(y2 - y) > g_minimumSize) {
         if (labelExistsInFrame(frame_nr, label)) return;
         if (!color) color = stringToColor(label);
@@ -454,10 +461,18 @@ function addBox(frame_nr, x, y, x2, y2, label, color) {
         if (!(frame_nr in g_boxes))
             g_boxes[frame_nr] = [];
         g_boxes[frame_nr].push(box);
-        g_undoStack.push({type: 'add', frame_nr: frame_nr, box: box});
+        // Boxes hydrated from the server on page load are not undoable user
+        // actions - recording them here would let Ctrl+Z silently delete
+        // already-saved boxes instead of just the most recent new one.
+        if (recordUndo)
+            g_undoStack.push({type: 'add', frame_nr: frame_nr, box: box});
         addKeyFrame(frame_nr);
         redrawSequence();
-        rebuildLabelDropdown();
+        // rebuildLabelDropdown() rescans every box on every frame; callers that
+        // add many boxes in a loop (hydration, copy/paste) pass false and rebuild
+        // once after the loop instead, to avoid an O(n^2) stall.
+        if (updateDropdown)
+            rebuildLabelDropdown();
     }
 }
 
@@ -554,9 +569,11 @@ function copyToNext() {
                 b.x + b.width,
                 b.y + b.height,
                 b.label,
-                b.color  // preserve color
+                b.color,  // preserve color
+                true, false
             );
         }
+        rebuildLabelDropdown();
         g_annotationHasChanged = true;
         goToCopiedFrame(nextFrameNr);
     }
@@ -575,9 +592,11 @@ function copyToPrevious() {
                 b.x + b.width,
                 b.y + b.height,
                 b.label,
-                b.color  // preserve color
+                b.color,  // preserve color
+                true, false
             );
         }
+        rebuildLabelDropdown();
         g_annotationHasChanged = true;
         goToCopiedFrame(previousFrameNr);
     }
@@ -619,9 +638,11 @@ function pasteAllBoxes() {
             b.x + b.width,
             b.y + b.height,
             b.label,
-            b.color  // preserve color
+            b.color,  // preserve color
+            true, false
         );
     }
+    rebuildLabelDropdown();
     g_annotationHasChanged = true;
 }
 
@@ -639,10 +660,11 @@ function loadBBTask(image_sequence_id) {
         for (var i = 0; i < g_hydrationBoxes.length; i++) {
             var b = g_hydrationBoxes[i];
             try {
-                addBox(b.frame_nr, b.x, b.y, b.x + b.width, b.y + b.height, b.label);
+                addBox(b.frame_nr, b.x, b.y, b.x + b.width, b.y + b.height, b.label, undefined, false, false);
             } catch (e) {}
         }
         g_hydrationBoxes = [];
+        rebuildLabelDropdown();
 
         // Snap to the first key frame before setting up mouse handlers.
         // loadSequence sets g_currentFrameNr=0 because g_targetFrames is empty
