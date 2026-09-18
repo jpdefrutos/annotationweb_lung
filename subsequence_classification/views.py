@@ -7,6 +7,7 @@ from django.http import Http404
 from django.db import transaction
 
 import common.task
+from common.label import get_or_create_task_label
 from .models import *
 from annotationweb.models import Task, ImageAnnotation, KeyFrameAnnotation, Label, TrackingData, SynchronisedTrackingData
 import re
@@ -176,13 +177,7 @@ def save_labels(request):
                     custom_label = custom_frame_labels.get(str(annotation.frame_nr))
                     if custom_label:
                         task = annotation.image_annotation.task
-                        label = task.label.filter(name=custom_label).first()
-                        if not label:
-                            label = Label.objects.create(
-                                name=custom_label,
-                                color_red=128, color_green=128, color_blue=128
-                            )
-                            task.label.add(label)
+                        label = get_or_create_task_label(task, custom_label, (128, 128, 128))
                         sublabel = SubsequenceLabel.objects.create(
                             image=annotation,
                             label=label,
@@ -202,13 +197,7 @@ def save_labels(request):
                             frame_nr=frame_nr
                         )
                         task = image_annotation.task
-                        label = task.label.filter(name=custom_label).first()
-                        if not label:
-                            label = Label.objects.create(
-                                name=custom_label,
-                                color_red=0, color_green=255, color_blue=0
-                            )
-                            task.label.add(label)
+                        label = get_or_create_task_label(task, custom_label, (0, 255, 0))
                         sublabel = SubsequenceLabel.objects.create(
                             image=annotation,
                             label=label,
