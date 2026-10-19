@@ -2,8 +2,9 @@ import json
 from django.db import transaction
 from django.shortcuts import render, redirect
 from django.http import JsonResponse
-from annotationweb.models import Task, Label
+from annotationweb.models import Task
 from common.task import setup_task_context, save_annotation, NoMoreImages
+from common.label import get_or_create_task_label
 from .models import BronchoscopyBoundingBox
 from subsequence_classification.models import SubsequenceLabel
 
@@ -45,7 +46,6 @@ def save_boxes(request):
             boxes_data = json.loads(request.POST['boxes'])
 
             task = Task.objects.get(pk=int(request.POST['task_id']))
-            existing_label_names = set(task.label.values_list('name', flat=True))
             label_colors = {}
             for frame_boxes in boxes_data.values():
                 for box in frame_boxes:
@@ -53,10 +53,7 @@ def save_boxes(request):
                     if name and name not in label_colors:
                         label_colors[name] = box.get('color', '#e6194b')
             for name, hex_color in label_colors.items():
-                if name not in existing_label_names:
-                    r, g, b = _hex_to_rgb(hex_color)
-                    new_label = Label.objects.create(name=name, color_red=r, color_green=g, color_blue=b)
-                    task.label.add(new_label)
+                get_or_create_task_label(task, name, _hex_to_rgb(hex_color))
 
             for annotation in annotations:
                 frame_nr = str(annotation.frame_nr)

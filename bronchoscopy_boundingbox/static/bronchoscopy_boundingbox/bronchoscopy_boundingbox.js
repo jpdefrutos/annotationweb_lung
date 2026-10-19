@@ -17,13 +17,58 @@ var g_hoverX = null;
 var g_hoverY = null;
 var g_undoStack = []; // {type: 'add'|'remove', frame_nr, box, index}
 var g_hydrationBoxes = []; // Saved boxes from the server, applied once real canvas size is known
+var g_boxClipboard = []; // Boxes saved via copyAllBoxes(), for pasting onto a non-adjacent frame
 
 function getCurrentLabel() {
     var input = document.getElementById('boxLabel');
     return input ? input.value.trim() : '';
 }
 
+// Position clamped to the image bounds, so dragging the mouse past the edge of
+// the frame (which happens often when a box needs to reach the frame's actual
+// edge) still resolves to a position exactly on that edge, instead of requiring
+// the cursor to land on the exact last pixel of the image.
+function clampedMousePos(e, canvas) {
+    var pos = mousePos(e, canvas);
+    pos.x = clamp(pos.x, 0, g_canvasWidth);
+    pos.y = clamp(pos.y, 0, g_canvasHeight);
+    return pos;
+}
+
+function applyDragMove(pos) {
+    if (g_paint) {
+        g_BBx2 = pos.x;
+        g_BBy2 = pos.y;
+        redrawSequence();
+        return;
+    }
+    var xDiff = pos.x - g_BBx;
+    var yDiff = pos.y - g_BBy;
+    g_BBx = pos.x;
+    g_BBy = pos.y;
+    if (g_move) {
+        moveBox(g_currentBox, xDiff, yDiff);
+    } else if (g_resize) {
+        resizeBox(g_currentBox, xDiff, yDiff);
+    }
+}
+
+function finishDrag() {
+    if (g_move || g_resize) {
+        g_move = false;
+        g_resize = false;
+        return;
+    }
+    if (g_paint) {
+        g_paint = false;
+        g_annotationHasChanged = true;
+        addBox(g_currentFrameNr, g_BBx, g_BBy, g_BBx2, g_BBy2, getCurrentLabel());
+    }
+}
+
 function setupSegmentation() {
+    var canvas = document.getElementById('canvas');
+
     $('#canvas').mousedown(function(e) {
         var pos = mousePos(e, this);
         g_BBx = pos.x;
@@ -46,46 +91,44 @@ function setupSegmentation() {
     });
 
     $('#canvas').mousemove(function(e) {
-        var pos = mousePos(e, this);
+        var pos = clampedMousePos(e, this);
         g_hoverX = pos.x;
         g_hoverY = pos.y;
-        if (g_paint) {
-            g_BBx2 = pos.x;
-            g_BBy2 = pos.y;
-            redrawSequence();
-            return;
-        }
-        var xDiff = pos.x - g_BBx;
-        var yDiff = pos.y - g_BBy;
-        g_BBx = pos.x;
-        g_BBy = pos.y;
-        if (g_move) {
-            moveBox(g_currentBox, xDiff, yDiff);
-            return;
-        }
-        if (g_resize) {
-            resizeBox(g_currentBox, xDiff, yDiff);
-        }
+        applyDragMove(pos);
     });
 
     $('#canvas').mouseup(function(e) {
-        g_move = false;
-        g_resize = false;
-        if (!g_paint) return;
-        g_paint = false;
-        g_annotationHasChanged = true;
-        addBox(g_currentFrameNr, g_BBx, g_BBy, g_BBx2, g_BBy2, getCurrentLabel());
+        finishDrag();
     });
 
     $('#canvas').mouseleave(function(e) {
-        if (g_paint) {
-            g_annotationHasChanged = true;
-            addBox(g_currentFrameNr, g_BBx, g_BBy, g_BBx2, g_BBy2, getCurrentLabel());
-            redrawSequence();
-            g_paint = false;
-        }
         g_hoverX = null;
         g_hoverY = null;
+    });
+
+    // The handlers above only fire while the cursor is over the canvas, so
+    // dragging past the edge of the frame would otherwise freeze the box at
+    // whatever position was last inside the canvas. These document-level
+    // fallbacks keep an in-progress paint/move/resize going (clamped to the
+    // image bounds) once the cursor leaves the canvas, and let releasing the
+    // mouse anywhere - not just back over the canvas - end the drag.
+    $(document).mousemove(function(e) {
+        if (e.target === canvas) return; // already handled above
+        if (!g_paint && !g_move && !g_resize) return;
+        applyDragMove(clampedMousePos(e, canvas));
+    });
+
+    $(document).mouseup(function(e) {
+        if (e.target === canvas) return; // already handled above
+        finishDrag();
+    });
+
+    // A drag released outside the browser window (e.g. alt-tab) never fires
+    // mouseup at all; drop it instead of leaving g_paint/g_move/g_resize stuck.
+    $(window).on('blur', function() {
+        g_paint = false;
+        g_move = false;
+        g_resize = false;
     });
 
     $('#canvas').dblclick(function(e) {
@@ -130,13 +173,17 @@ function setupSegmentation() {
         rebuildLabelDropdown();
     });
 
-    // Selecting an existing label loads it into the Box label field (read-only, to
-    // prevent accidental typos creating a near-duplicate label). Selecting "New label"
-    // clears the field and makes it editable again.
+    // Selecting an existing label loads it into the Box label field so it can be
+    // tweaked (e.g. picking "1,2,1,1" to then edit into "1,2,1,2") rather than
+    // retyped from scratch. Select the text so retyping the differing part is a
+    // single keystroke away.
     $('#usedLabelsSelect').change(function() {
         var val = $(this).val();
-        $('#boxLabel').val(val);
-        updateBoxLabelEditability();
+        if (!val) return;
+        var boxLabelInput = document.getElementById('boxLabel');
+        boxLabelInput.value = val;
+        boxLabelInput.focus();
+        boxLabelInput.select();
     });
 
     $('#renameLabelButton').click(function() {
@@ -146,13 +193,34 @@ function setupSegmentation() {
     rebuildLabelDropdown();
 
     // Ctrl+C: copy current frame's boxes to the next frame
+    // Ctrl+Shift+C: copy current frame's boxes to the previous frame
     $(document).keydown(function(e) {
         if (e.ctrlKey && e.which === 67) {
             var tag = e.target.tagName;
             if (tag === 'INPUT' || tag === 'TEXTAREA') // Don't hijack normal text copy (e.g. boxLabel field)
                 return;
             e.preventDefault();
-            copyToNext();
+            if (e.shiftKey)
+                copyToPrevious();
+            else
+                copyToNext();
+        }
+    });
+
+    // Ctrl+Shift+A: copy all boxes on the current frame to the clipboard
+    // Ctrl+Shift+V: paste all boxes from the clipboard onto the current frame
+    // (avoids Alt-based combos: Ctrl+Alt is indistinguishable from AltGr on many
+    // European keyboard layouts and would misfire there)
+    $(document).keydown(function(e) {
+        if (e.ctrlKey && e.shiftKey && (e.which === 65 || e.which === 86)) {
+            var tag = e.target.tagName;
+            if (tag === 'INPUT' || tag === 'TEXTAREA')
+                return;
+            e.preventDefault();
+            if (e.which === 65)
+                copyAllBoxes();
+            else
+                pasteAllBoxes();
         }
     });
 
@@ -178,13 +246,30 @@ function isInsideBox(x, y) {
     return { isInside: isInside, boxNr: boxNr, isInsideCorner: isInsideCorner };
 }
 
-function removeBox(boxNr) {
+function removeBox(boxNr, updateDropdown) {
+    if (updateDropdown === undefined) updateDropdown = true;
     var frame_nr = g_currentFrameNr;
     var removed = g_boxes[frame_nr].splice(boxNr, 1)[0];
     if (removed)
         g_undoStack.push({type: 'remove', frame_nr: frame_nr, box: removed, index: boxNr});
     g_annotationHasChanged = true;
     redrawSequence();
+    if (updateDropdown)
+        rebuildLabelDropdown();
+}
+
+// Deletes every box on the current frame, one at a time via removeBox() so each
+// is pushed onto the undo stack individually - Ctrl+Z undoes them one by one,
+// same as deleting them by hand. The dropdown is only rebuilt once at the end
+// rather than after each removal, since rebuildLabelDropdown() rescans every
+// box on every frame and doing that per-box makes bulk deletion quadratic.
+function deleteAllBoxesInFrame() {
+    var boxes = g_boxes[g_currentFrameNr];
+    if (!boxes || boxes.length === 0) return;
+    if (!confirm('Delete all ' + boxes.length + ' box(es) on this frame?')) return;
+    for (var i = boxes.length - 1; i >= 0; i--) {
+        removeBox(i, false);
+    }
     rebuildLabelDropdown();
 }
 
@@ -237,6 +322,11 @@ function getUsedLabels() {
     return Object.keys(seen).sort(compareLabels);
 }
 
+// The "Used labels" dropdown is just a shortcut to fill in the Box label field
+// (see the change handler above) - it doesn't gate what can be drawn. The Box
+// label field always accepts free text, and drawing a box with a label that
+// hasn't been used before on this video simply creates it, picking up a color
+// from stringToColor() the same way any other new label does.
 function rebuildLabelDropdown() {
     var select = document.getElementById('usedLabelsSelect');
     if (!select) return;
@@ -244,11 +334,6 @@ function rebuildLabelDropdown() {
     var labels = getUsedLabels();
 
     select.innerHTML = '';
-    var newLabelOption = document.createElement('option');
-    newLabelOption.value = '';
-    newLabelOption.textContent = 'New label';
-    select.appendChild(newLabelOption);
-
     for (var i = 0; i < labels.length; i++) {
         var option = document.createElement('option');
         option.value = labels[i];
@@ -256,28 +341,9 @@ function rebuildLabelDropdown() {
         select.appendChild(option);
     }
 
-    var stillValid = labels.indexOf(currentValue) !== -1;
-    select.value = stillValid ? currentValue : '';
-
-    // If the previously selected label no longer exists (e.g. its last box was
-    // deleted/undone), fall back to "New label" and clear the now-stale text.
-    if (currentValue && !stillValid) {
-        var boxLabelInput = document.getElementById('boxLabel');
-        if (boxLabelInput) boxLabelInput.value = '';
+    if (labels.indexOf(currentValue) !== -1) {
+        select.value = currentValue;
     }
-
-    updateBoxLabelEditability();
-}
-
-// Only "New label" allows free typing; an existing label picked from the dropdown
-// is read-only, to avoid a typo silently creating a near-duplicate label.
-function updateBoxLabelEditability() {
-    var select = document.getElementById('usedLabelsSelect');
-    var boxLabelInput = document.getElementById('boxLabel');
-    if (!select || !boxLabelInput) return;
-    var isNewLabel = select.value === '';
-    boxLabelInput.readOnly = !isNewLabel;
-    boxLabelInput.style.backgroundColor = isNewLabel ? '' : '#eee';
 }
 
 // Renames the label currently selected in the dropdown on every box that has it,
@@ -288,7 +354,7 @@ function renameSelectedLabel() {
     if (!select) return;
     var oldLabel = select.value;
     if (!oldLabel) {
-        alert('Select an existing label to rename (not "New label").');
+        alert('Select an existing label to rename.');
         return;
     }
 
@@ -339,7 +405,6 @@ function renameSelectedLabel() {
     rebuildLabelDropdown();
     select.value = newLabel;
     $('#boxLabel').val(newLabel);
-    updateBoxLabelEditability();
     redrawSequence();
 
     if (skippedFrames.length > 0) {
@@ -385,7 +450,9 @@ function createBox(x, y, x2, y2, label, color) {
     };
 }
 
-function addBox(frame_nr, x, y, x2, y2, label, color) {
+function addBox(frame_nr, x, y, x2, y2, label, color, recordUndo, updateDropdown) {
+    if (recordUndo === undefined) recordUndo = true;
+    if (updateDropdown === undefined) updateDropdown = true;
     if (Math.abs(x2 - x) > g_minimumSize && Math.abs(y2 - y) > g_minimumSize) {
         if (labelExistsInFrame(frame_nr, label)) return;
         if (!color) color = stringToColor(label);
@@ -394,10 +461,18 @@ function addBox(frame_nr, x, y, x2, y2, label, color) {
         if (!(frame_nr in g_boxes))
             g_boxes[frame_nr] = [];
         g_boxes[frame_nr].push(box);
-        g_undoStack.push({type: 'add', frame_nr: frame_nr, box: box});
+        // Boxes hydrated from the server on page load are not undoable user
+        // actions - recording them here would let Ctrl+Z silently delete
+        // already-saved boxes instead of just the most recent new one.
+        if (recordUndo)
+            g_undoStack.push({type: 'add', frame_nr: frame_nr, box: box});
         addKeyFrame(frame_nr);
         redrawSequence();
-        rebuildLabelDropdown();
+        // rebuildLabelDropdown() rescans every box on every frame; callers that
+        // add many boxes in a loop (hydration, copy/paste) pass false and rebuild
+        // once after the loop instead, to avoid an O(n^2) stall.
+        if (updateDropdown)
+            rebuildLabelDropdown();
     }
 }
 
@@ -451,22 +526,108 @@ function redrawSequence() {
     $('#subsequenceLabel').text(label);
 }
 
+// goToFrame() (annotationweb.js) clamps to g_framesLoaded-1, i.e. how many of this
+// sequence's frame images have *finished downloading so far* - not a sequence
+// boundary. On a "show_entire_sequence" task with ~1800 frames, that count lags
+// well behind the real position for a while after page load, so goToFrame() would
+// silently land on whatever frame happened to be loaded instead of the one we just
+// copied to. Navigate directly to the real target frame instead, redrawing once its
+// image has actually finished loading if it hasn't yet.
+function goToCopiedFrame(frameNr) {
+    setPlayButton(false);
+    g_currentFrameNr = frameNr;
+    $('#slider').slider('value', frameNr);
+    $('#currentFrame').text(g_currentFrameNr);
+    var marker_index = g_targetFrames.findIndex(index => index === frameNr);
+    if (marker_index) {
+        g_currentTargetFrameIndex = g_currentFrameNr;
+    } else {
+        g_currentTargetFrameIndex = -1;
+    }
+
+    var img = g_sequence[frameNr - g_startFrame];
+    if (img && img.complete && img.naturalWidth > 0) {
+        redrawSequence();
+    } else if (img) {
+        img.addEventListener('load', function onLoaded() {
+            img.removeEventListener('load', onLoaded);
+            if (g_currentFrameNr === frameNr) redrawSequence();
+        });
+    }
+}
+
+// Adds a copy of each given box to targetFrameNr, preserving label/color, and
+// rebuilds the label dropdown once at the end. Shared by copyToNext/
+// copyToPrevious/pasteAllBoxes so a future per-box field only needs to be
+// threaded through in one place instead of three.
+function copyBoxesToFrame(boxes, targetFrameNr) {
+    for (var i = 0; i < boxes.length; i++) {
+        var b = boxes[i];
+        addBox(
+            targetFrameNr,
+            b.x, b.y,
+            b.x + b.width,
+            b.y + b.height,
+            b.label,
+            b.color,  // preserve color
+            true, false
+        );
+    }
+    rebuildLabelDropdown();
+}
+
 function copyToNext() {
-    if (g_currentFrameNr < g_sequenceLength + 1) {
+    if (g_currentFrameNr < g_startFrame + g_sequenceLength) {
         var boxes_to_copy = g_boxes[g_currentFrameNr];
         if (!boxes_to_copy || boxes_to_copy.length === 0) return;
-        for (var i = 0; i < boxes_to_copy.length; i++) {
-            var b = boxes_to_copy[i];
-            addBox(
-                g_currentFrameNr + 1,
-                b.x, b.y,
-                b.x + b.width,
-                b.y + b.height,
-                b.label,
-                b.color  // preserve color
-            );
-        }
+        var nextFrameNr = g_currentFrameNr + 1;
+        copyBoxesToFrame(boxes_to_copy, nextFrameNr);
+        g_annotationHasChanged = true;
+        goToCopiedFrame(nextFrameNr);
     }
+}
+
+function copyToPrevious() {
+    if (g_currentFrameNr > g_startFrame) {
+        var boxes_to_copy = g_boxes[g_currentFrameNr];
+        if (!boxes_to_copy || boxes_to_copy.length === 0) return;
+        var previousFrameNr = g_currentFrameNr - 1;
+        copyBoxesToFrame(boxes_to_copy, previousFrameNr);
+        g_annotationHasChanged = true;
+        goToCopiedFrame(previousFrameNr);
+    }
+}
+
+function updateBoxClipboardStatus() {
+    var el = document.getElementById('boxClipboardStatus');
+    if (!el) return;
+    el.textContent = g_boxClipboard.length > 0
+        ? 'Clipboard: ' + g_boxClipboard.length + ' box' + (g_boxClipboard.length === 1 ? '' : 'es')
+        : 'Clipboard: empty';
+}
+
+// Copies every box on the current frame into a clipboard that survives jumping
+// to a non-adjacent frame (unlike copyToNext/copyToPrevious), for the case where
+// the same set of boxes needs to reappear several frames later.
+function copyAllBoxes() {
+    var boxes = g_boxes[g_currentFrameNr];
+    if (!boxes || boxes.length === 0) {
+        alert('No boxes on the current frame to copy.');
+        return;
+    }
+    g_boxClipboard = boxes.map(function(b) {
+        return { x: b.x, y: b.y, width: b.width, height: b.height, label: b.label, color: b.color };
+    });
+    updateBoxClipboardStatus();
+}
+
+function pasteAllBoxes() {
+    if (!g_boxClipboard || g_boxClipboard.length === 0) {
+        alert("Clipboard is empty. Use 'Copy all boxes' first.");
+        return;
+    }
+    copyBoxesToFrame(g_boxClipboard, g_currentFrameNr);
+    g_annotationHasChanged = true;
 }
 
 function loadBBTask(image_sequence_id) {
@@ -483,10 +644,11 @@ function loadBBTask(image_sequence_id) {
         for (var i = 0; i < g_hydrationBoxes.length; i++) {
             var b = g_hydrationBoxes[i];
             try {
-                addBox(b.frame_nr, b.x, b.y, b.x + b.width, b.y + b.height, b.label);
+                addBox(b.frame_nr, b.x, b.y, b.x + b.width, b.y + b.height, b.label, undefined, false, false);
             } catch (e) {}
         }
         g_hydrationBoxes = [];
+        rebuildLabelDropdown();
 
         // Snap to the first key frame before setting up mouse handlers.
         // loadSequence sets g_currentFrameNr=0 because g_targetFrames is empty
