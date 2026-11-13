@@ -82,6 +82,14 @@ function setupSegmentation() {
                 g_move = true;
             return;
         }
+        // Clicking a suggestion selects it (proposals.js) instead of drawing
+        var proposal = proposalAt(pos.x, pos.y);
+        if (proposal) {
+            selectProposal(proposal);
+            return;
+        }
+        if (g_selectedProposal)
+            selectProposal(null);
         if (!getCurrentLabel()) {
             var el = document.getElementById('boxLabel');
             if (el) { el.style.outline = '2px solid red'; setTimeout(function(){ el.style.outline = ''; }, 1000); }
@@ -136,6 +144,8 @@ function setupSegmentation() {
         var inside = isInsideBox(pos.x, pos.y);
         if (inside.isInside)
             removeBox(inside.boxNr);
+        else
+            rejectProposalAt(pos.x, pos.y);
     });
 
     // Ctrl+D: delete the box under the mouse pointer (alternative to double-click)
@@ -150,6 +160,8 @@ function setupSegmentation() {
             var inside = isInsideBox(g_hoverX, g_hoverY);
             if (inside.isInside)
                 removeBox(inside.boxNr);
+            else
+                rejectProposalAt(g_hoverX, g_hoverY);
         }
     });
 
@@ -191,6 +203,7 @@ function setupSegmentation() {
     });
 
     rebuildLabelDropdown();
+    setupProposals();
 
     // Ctrl+C: copy current frame's boxes to the next frame
     // Ctrl+Shift+C: copy current frame's boxes to the previous frame
@@ -450,11 +463,13 @@ function createBox(x, y, x2, y2, label, color) {
     };
 }
 
+// Returns the new box, or null if it was not added (too small, or the label is
+// already used on that frame).
 function addBox(frame_nr, x, y, x2, y2, label, color, recordUndo, updateDropdown) {
     if (recordUndo === undefined) recordUndo = true;
     if (updateDropdown === undefined) updateDropdown = true;
     if (Math.abs(x2 - x) > g_minimumSize && Math.abs(y2 - y) > g_minimumSize) {
-        if (labelExistsInFrame(frame_nr, label)) return;
+        if (labelExistsInFrame(frame_nr, label)) return null;
         if (!color) color = stringToColor(label);
         else if (label && !g_labelColorMap[label]) g_labelColorMap[label] = color;
         var box = createBox(x, y, x2, y2, label, color);
@@ -473,7 +488,9 @@ function addBox(frame_nr, x, y, x2, y2, label, color, recordUndo, updateDropdown
         // once after the loop instead, to avoid an O(n^2) stall.
         if (updateDropdown)
             rebuildLabelDropdown();
+        return box;
     }
+    return null;
 }
 
 function labelExistsInFrame(frame_nr, label) {
@@ -495,6 +512,8 @@ function redraw() {
         g_context.rect(preview.x, preview.y, preview.width, preview.height);
         g_context.stroke();
     }
+
+    drawProposals();
 
     if (!(g_currentFrameNr in g_boxes)) return;
 
