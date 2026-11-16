@@ -32,6 +32,7 @@ function proposalParams() {
     if (track) {
         p.track_iou = $('#propTrackIou').val();
         p.max_lost = $('#propMaxLost').val();
+        p.min_track_len = $('#propMinTrackLen').val();
         if (levels === 2)
             p.track_iou2 = $('#propTrackIou2').val();
     }
@@ -79,7 +80,8 @@ function requestProposals(startFrame) {
         var n = data.rows.length;
         setProposalStatus(n + ' suggestion' + (n === 1 ? '' : 's') + ' in frames ' +
             data.frames[0] + '–' + data.frames[1] +
-            (continued ? ' (tracks continued)' : ' (new run ' + data.state.run_id + ')') + '.');
+            (continued ? ' (tracks continued)' : ' (new run ' + data.state.run_id + ')') + '.' +
+            (data.dropped ? ' ' + data.dropped + ' box(es) on short tracks were left out.' : ''));
         if (startFrame !== g_currentFrameNr)
             goToCopiedFrame(startFrame);
         else

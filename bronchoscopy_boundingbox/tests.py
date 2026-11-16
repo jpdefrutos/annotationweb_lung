@@ -28,17 +28,24 @@ def _write_mhd(path, img):
                 'ElementDataFile = %s\n' % (len(raw), W, H, data_name))
 
 
-def _frame(dx):
-    """Bright scope image (black margins) with two dark 'lumens', moved by dx."""
+def _frame(dx, extras=()):
+    """Bright scope image (black margins) with two dark 'lumens', moved by dx,
+    plus extra dark disks (cx, cy, r)."""
     img = np.zeros((H, W, 3), np.uint8)
     yy, xx = np.mgrid[:H, :W]
     img[:, 40:300] = (150 + xx[:, 40:300] % 7)[..., None]   # textured bright area
     img[(xx - (100 + dx)) ** 2 + (yy - 120) ** 2 < 30 ** 2] = 10
     img[(xx - (220 + dx)) ** 2 + (yy - 100) ** 2 < 25 ** 2] = 12
+    for cx, cy, r in extras:
+        img[(xx - cx) ** 2 + (yy - cy) ** 2 < r ** 2] = 11
     return img
 
 
 class LumenProposalTests(TestCase):
+    @staticmethod
+    def extras(f):
+        return ()
+
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -46,7 +53,7 @@ class LumenProposalTests(TestCase):
         cls.frame_dir = os.path.join(cls.tmp, 'frames')
         os.makedirs(cls.frame_dir)
         for f in range(10):
-            _write_mhd(os.path.join(cls.frame_dir, 'seq_%d.mhd' % f), _frame(f))
+            _write_mhd(os.path.join(cls.frame_dir, 'seq_%d.mhd' % f), _frame(f, cls.extras(f)))
         cls.cache_dir = os.path.join(cls.tmp, 'cache')
         cls.settings_override = override_settings(LUMEN_CACHE_DIR=cls.cache_dir)
         cls.settings_override.enable()
@@ -134,6 +141,88 @@ class LumenProposalTests(TestCase):
 
     def test_get_not_allowed(self):
         self.assertEqual(self.client.get('/bronchoscopy-bounding-box/propose/').status_code, 405)
+
+
+class SingleFrameTrackTests(LumenProposalTests):
+    """A lumen in frames 3-4 only (kept, also when a chunk ends at frame 3) and a
+    blip in frame 6 only (dropped as noise). Inherits and reruns every test
+    above on this video, with the expected counts overridden below."""
+    PAIR = (170, 200, 22)       # frames 3 and 4
+    BLIP = (270, 200, 22)       # frame 6 only
+
+    @staticmethod
+    def extras(f):
+        return ([SingleFrameTrackTests.PAIR] if f in (3, 4) else []) + \
+               ([SingleFrameTrackTests.BLIP] if f == 6 else [])
+
+    def test_detects_both_lumens_and_tracks_them_across_chunks(self):
+        pass                    # counts differ on this video; covered below
+
+    def _boxes_at(self, rows, cx, cy):
+        return [r for r in rows if r['x'] <= cx <= r['x'] + r['width']
+                and r['y'] <= cy <= r['y'] + r['height']]
+
+    def test_single_frame_blip_is_dropped_two_frame_track_kept(self):
+        r = self._propose(0, 10).json()
+        self.assertEqual(self._boxes_at(r['rows'], 270, 200), [])
+        pair = self._boxes_at(r['rows'], 170, 200)
+        self.assertEqual(sorted(b['frame_nr'] for b in pair), [3, 4])
+        self.assertEqual(r['dropped'], 1)
+
+    def test_track_split_over_chunk_boundary_is_kept(self):
+        a = self._propose(0, 4).json()          # frames 0-3: pair only in frame 3 here
+        self.assertEqual([b['frame_nr'] for b in self._boxes_at(a['rows'], 170, 200)], [3])
+        b = self._propose(4, 6, state=a['state']).json()
+        self.assertEqual([x['frame_nr'] for x in self._boxes_at(b['rows'], 170, 200)], [4])
+
+    def test_min_track_len_one_keeps_blip(self):
+        r = self._propose(0, 10, params={'min_track_len': 1}).json()
+        self.assertEqual(len(self._boxes_at(r['rows'], 270, 200)), 1)
+
+    def test_no_tracking_keeps_blip(self):
+        r = self._propose(0, 10, params={'track': False}).json()
+        self.assertEqual(len(self._boxes_at(r['rows'], 270, 200)), 1)
+
+
+class MainBoxOnlyFilterTests(TestCase):
+    """min_track_len filters main boxes (with their children), never nested tracks."""
+
+    def _run(self, per_frame, **params):
+        # per_frame: {frame: {"level1": [box], "level2": [(box, parent_index)]}}
+        from unittest import mock
+        frames = {f: '/x/%d.mhd' % f for f in per_frame}
+        with mock.patch.object(lumen, 'read_mhd', side_effect=lambda path: path), \
+                mock.patch.object(lumen, 'detect',
+                                  side_effect=lambda img, roi, mask, p: per_frame[int(img[3:-4])]), \
+                mock.patch.object(lumen.os.path, 'isfile', return_value=True):
+            r = lumen.Runner(frames, None, None, lumen.Params(levels=2, **params))
+            return r.process(sorted(frames)), r
+
+    BIG, OTHER = (0, 0, 100, 100), (300, 300, 100, 100)
+    KID1, KID2 = (10, 10, 20, 20), (60, 60, 20, 20)
+
+    def test_nested_tracks_are_not_filtered(self):
+        # parent in both frames; its two children jump around, so each child
+        # track is one frame long, but they are kept
+        per_frame = {0: {"level1": [self.BIG], "level2": [(self.KID1, 0), (self.KID2, 0)]},
+                     1: {"level1": [self.BIG], "level2": [((40, 10, 20, 20), 0), ((10, 60, 20, 20), 0)]}}
+        rows, r = self._run(per_frame)
+        self.assertEqual(sum(x['level'] == 2 for x in rows), 4)
+        self.assertEqual(r.dropped, 0)
+
+    def test_short_main_track_dropped_with_children(self):
+        per_frame = {0: {"level1": [self.BIG], "level2": []},
+                     1: {"level1": [self.BIG, self.OTHER], "level2": [((310, 310, 20, 20), 1), ((360, 360, 20, 20), 1)]},
+                     2: {"level1": [self.BIG], "level2": []}}
+        rows, r = self._run(per_frame)
+        self.assertEqual([(x['frame_nr'], x['level']) for x in rows], [(0, 1), (1, 1), (2, 1)])
+        self.assertEqual(r.dropped, 3)
+
+    def test_min_track_len_one_keeps_everything(self):
+        per_frame = {0: {"level1": [self.BIG], "level2": []},
+                     1: {"level1": [self.BIG, self.OTHER], "level2": []}}
+        rows, r = self._run(per_frame, min_track_len=1)
+        self.assertEqual(len(rows), 3)
 
 
 class MinChildrenTests(TestCase):

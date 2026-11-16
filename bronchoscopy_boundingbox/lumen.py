@@ -12,6 +12,10 @@ frames and settings. Differences from lumen_core:
   - Errors raise LumenError instead of calling sys.exit().
   - Level-2 children are dropped unless their parent has at least
     min_children of them (default 2; min_children=1 gives the scripts' result).
+  - With tracking, a main (level-1) box whose track appears in fewer than
+    min_track_len frames (default 2) is dropped as noise, with its children
+    (min_track_len=1 gives the scripts' result). Nested tracks are not
+    filtered. See Runner.process for how chunk edges are handled.
   - The tracker state is a plain JSON-serialisable dict, so the browser can
     hand it back with the next chunk and the tracks continue across requests
     (Django keeps no Runner in memory between requests).
@@ -78,6 +82,7 @@ class Params:
     track_iou: float = 0.3      # min IoU to continue a level-1 track
     track_iou2: float = None    # same for level 2 (None = track_iou)
     max_lost: int = 5           # frames a track survives without a match
+    min_track_len: int = 2      # with tracking: drop main boxes whose track is in fewer frames
 
     @property
     def iou2(self):
@@ -96,6 +101,7 @@ PARAM_LIMITS = {
     "track_iou": (float, 0.0, 1.0),
     "track_iou2": (float, 0.0, 1.0),
     "max_lost": (int, 0, 100),
+    "min_track_len": (int, 1, 10),
 }
 
 
@@ -439,7 +445,8 @@ class IoUTracker:
 
     def __init__(self, iou_thr, max_lost, new_id, tracks=None):
         self.iou_thr, self.max_lost, self.new_id = iou_thr, max_lost, new_id
-        self.tracks = tracks if tracks is not None else {}  # id -> {"box", "lost"}
+        # id -> {"box": last box, "lost": frames unmatched, "n": frames seen}
+        self.tracks = tracks if tracks is not None else {}
 
     def reset(self):
         self.tracks = {}
@@ -452,7 +459,7 @@ class IoUTracker:
         matched = set()
         for i, j, _ in match(prev, boxes, self.iou_thr):
             t = ids[i]
-            self.tracks[t] = {"box": boxes[j], "lost": 0}
+            self.tracks[t] = {"box": boxes[j], "lost": 0, "n": self.tracks[t]["n"] + 1}
             out[j] = t
             matched.add(t)
         for t in ids:
@@ -463,16 +470,17 @@ class IoUTracker:
         for j, b in enumerate(boxes):
             if out[j] is None:
                 out[j] = self.new_id()
-                self.tracks[out[j]] = {"box": b, "lost": 0}
+                self.tracks[out[j]] = {"box": b, "lost": 0, "n": 1}
         return out
 
     def dump(self):
-        return {str(t): {"box": [int(v) for v in d["box"]], "lost": d["lost"]}
+        return {str(t): {"box": [int(v) for v in d["box"]], "lost": d["lost"], "n": d["n"]}
                 for t, d in self.tracks.items()}
 
     @staticmethod
     def load_tracks(d):
-        return {int(t): {"box": tuple(int(v) for v in x["box"]), "lost": int(x["lost"])}
+        return {int(t): {"box": tuple(int(v) for v in x["box"]), "lost": int(x["lost"]),
+                         "n": int(x.get("n", 1))}
                 for t, x in (d or {}).items()}
 
 
@@ -493,7 +501,11 @@ class Runner:
 
     def __init__(self, frames, roi, mask, params, state=None):
         self.frames, self.roi, self.mask, self.p = frames, roi, mask, params
-        state = state if self._compatible(state, params) else None
+        self.dropped = 0        # boxes dropped by min_track_len in the last process()
+        self._load(state if self._compatible(state, params) else None)
+
+    def _load(self, state):
+        params = self.p
         if state:
             self.run_id = state["run_id"]
             self.prev = state.get("prev")
@@ -548,10 +560,58 @@ class Runner:
         return rows
 
     def process(self, frame_nrs):
+        """
+        Rows for consecutive frames. With tracking and min_track_len > 1, main
+        (level-1) boxes whose track appears in fewer than min_track_len frames
+        are dropped as noise, together with their children. Nested (level-2)
+        tracks are not filtered: small boxes overlap too little between frames
+        for their tracks to be reliable.
+
+        Whether a box on the last frames of the chunk is kept can depend on
+        later frames, so the tracker also looks ahead past the chunk: a track
+        that reaches min_track_len frames does so within
+        (min_track_len - 1) * (max_lost + 1) frames. The look-ahead rows are
+        not returned and the saved state is the one after the chunk, so the
+        next chunk (starting at the next frame) gives exactly the same result
+        as one long run. Frames seen in earlier chunks count via the state.
+        """
+        frame_nrs = list(frame_nrs)
+        p = self.p
+        self.dropped = 0
+        if not frame_nrs:
+            return []
+        filtering = p.track and p.min_track_len > 1
+        continues = self.prev is not None and frame_nrs[0] == self.prev + 1
+        # level-1 track id -> frames seen before this chunk
+        before = ({tid: d["n"] for tid, d in self.trackers[1].tracks.items()}
+                  if filtering and continues else {})
+
         rows = []
         for f in frame_nrs:
             rows += self.frame(f)
-        return rows
+        if not filtering:
+            return rows
+
+        snapshot = self.state()
+        ahead = []
+        f = frame_nrs[-1]
+        for _ in range((p.min_track_len - 1) * (p.max_lost + 1)):
+            f += 1
+            if f not in self.frames:
+                break                     # end of the video
+            ahead += self.frame(f)
+        self._load(snapshot)
+
+        seen = dict(before)
+        for r in rows + ahead:
+            if r["level"] == 1:
+                seen[r["box_id"]] = seen.get(r["box_id"], 0) + 1
+        parents = {(r["frame_nr"], r["box_id"]) for r in rows
+                   if r["level"] == 1 and seen[r["box_id"]] >= p.min_track_len}
+        out = [r for r in rows if (r["frame_nr"], r["box_id"] if r["level"] == 1
+                                   else r["parent_id"]) in parents]
+        self.dropped = len(rows) - len(out)
+        return out
 
 
 def _row(f, prefix, box, level, box_id, parent_id, run_id):

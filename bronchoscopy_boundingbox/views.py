@@ -136,4 +136,4 @@ def propose_boxes(request):
         return JsonResponse({'success': False, 'message': str(e)}, status=400)
 
     return JsonResponse({'success': True, 'rows': rows, 'state': runner.state(),
-                         'frames': [start, end]})
+                         'frames': [start, end], 'dropped': runner.dropped})
