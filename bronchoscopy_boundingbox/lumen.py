@@ -10,6 +10,8 @@ frames and settings. Differences from lumen_core:
   - Frames come from an ImageSequence (format with '#'), not from a patient
     folder lookup, and the ROI/scope-mask cache lives in LUMEN_CACHE_DIR.
   - Errors raise LumenError instead of calling sys.exit().
+  - Level-2 children are dropped unless their parent has at least
+    min_children of them (default 2; min_children=1 gives the scripts' result).
   - The tracker state is a plain JSON-serialisable dict, so the browser can
     hand it back with the next chunk and the tracks continue across requests
     (Django keeps no Runner in memory between requests).
@@ -21,6 +23,9 @@ Pipeline per frame
             darkest cluster -> connected blobs above min_area -> one box each.
   Level 2   (optional, levels=2) K-means again inside each level-1 blob. The
             darkest sub-cluster is split into blobs; each becomes a child box.
+            A parent's children are only kept if there are at least
+            min_children of them (default 2): a single nested opening is not
+            a real branching, so it is not proposed.
   Tracking  (optional) IoU tracker with Hungarian matching, one tracker per
             level sharing one ID counter. Tracks restart on a frame gap.
 
@@ -66,6 +71,7 @@ class Params:
     min_gap: float = 15.0       # darkest sub-centre this much below the next
     child_min: float = 0.03     # min child area, fraction of its parent blob
     child_max: float = 0.7      # max child area, fraction of its parent blob
+    min_children: int = 2       # keep a parent's children only if it has this many
     open2: int = 0              # opening on the child mask
     # tracking
     track: bool = True
@@ -85,6 +91,7 @@ PARAM_LIMITS = {
     "min_gap": (float, 0.0, 255.0),
     "child_min": (float, 0.0, 1.0),
     "child_max": (float, 0.0, 1.0),
+    "min_children": (int, 1, 20),
     "track": (bool, None, None),
     "track_iou": (float, 0.0, 1.0),
     "track_iou2": (float, 0.0, 1.0),
@@ -375,7 +382,10 @@ def detect(img, roi, mask, p):
     if p.levels < 2:
         return out
     for pi, comp_id in enumerate(s1["kept"]):
-        for box in split_blob(s1["gray"], s1["labels"] == comp_id, roi, p):
+        kids = split_blob(s1["gray"], s1["labels"] == comp_id, roi, p)
+        if len(kids) < p.min_children:
+            continue
+        for box in kids:
             out["level2"].append((box, pi))
     return out
 

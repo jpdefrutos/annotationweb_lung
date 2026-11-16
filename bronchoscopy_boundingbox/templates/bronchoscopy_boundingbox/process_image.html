@@ -20,24 +20,24 @@
         <label>Levels
             <select id="propLevels">
                 <option value="1">1 (main openings)</option>
-                <option value="2">1 + 2 (also nested)</option>
+                <option value="2" selected>1 + 2 (also nested)</option>
             </select>
         </label>
     </div>
     <div class="proposal-row">
-        <label title="Min blob size, fraction of the scope image">min_area <input type="number" id="propMinArea" value="0.02" step="0.005" min="0" max="1" style="width: 5em;"></label>
+        <label title="Min blob size, fraction of the scope image">min_area <input type="number" id="propMinArea" value="0.005" step="0.001" min="0" max="1" style="width: 5em;"></label>
     </div>
     <div class="proposal-row prop-level2">
-        <label title="Nested opening must be this many grey levels darker">min_gap <input type="number" id="propMinGap" value="15" step="1" min="0" max="255" style="width: 4em;"></label>
+        <label title="Nested opening must be this many grey levels darker">min_gap <input type="number" id="propMinGap" value="10" step="1" min="0" max="255" style="width: 4em;"></label>
         <label title="Min child size, fraction of its parent">child_min <input type="number" id="propChildMin" value="0.03" step="0.01" min="0" max="1" style="width: 4.5em;"></label>
     </div>
     <div class="proposal-row">
         <label><input type="checkbox" id="propTrack" checked> Track over frames</label>
     </div>
     <div class="proposal-row prop-track">
-        <label title="Min IoU to continue a level-1 track">track_iou <input type="number" id="propTrackIou" value="0.3" step="0.05" min="0" max="1" style="width: 4.5em;"></label>
-        <label class="prop-level2" title="Min IoU to continue a level-2 track">track_iou2 <input type="number" id="propTrackIou2" value="0.3" step="0.05" min="0" max="1" style="width: 4.5em;"></label>
-        <label title="Frames a track survives without a match">max_lost <input type="number" id="propMaxLost" value="5" step="1" min="0" max="100" style="width: 3.5em;"></label>
+        <label title="Min IoU to continue a level-1 track">track_iou <input type="number" id="propTrackIou" value="0.6" step="0.05" min="0" max="1" style="width: 4.5em;"></label>
+        <label class="prop-level2" title="Min IoU to continue a level-2 track">track_iou2 <input type="number" id="propTrackIou2" value="0.6" step="0.05" min="0" max="1" style="width: 4.5em;"></label>
+        <label title="Frames a track survives without a match">max_lost <input type="number" id="propMaxLost" value="1" step="1" min="0" max="100" style="width: 3.5em;"></label>
     </div>
     <div class="proposal-row">
         <button type="button" id="proposeButton" title="Suggest boxes for the next N frames, starting at the current frame">Suggest from current frame</button>

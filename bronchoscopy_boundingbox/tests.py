@@ -136,6 +136,27 @@ class LumenProposalTests(TestCase):
         self.assertEqual(self.client.get('/bronchoscopy-bounding-box/propose/').status_code, 405)
 
 
+class MinChildrenTests(TestCase):
+    """A parent's level-2 children are only kept if there are at least min_children."""
+
+    def _detect(self, n_kids, **params):
+        from unittest import mock
+        kids = [(10 + 20 * i, 10, 15, 15) for i in range(n_kids)]
+        level1 = {"gray": None, "labels": np.zeros((2, 2)), "kept": [1], "boxes": [(0, 0, 100, 100)]}
+        with mock.patch.object(lumen, 'detect_level1', return_value=level1), \
+                mock.patch.object(lumen, 'split_blob', return_value=kids):
+            return lumen.detect(None, None, None, lumen.Params(levels=2, **params))
+
+    def test_single_child_is_dropped(self):
+        self.assertEqual(self._detect(1)["level2"], [])
+
+    def test_two_children_are_kept(self):
+        self.assertEqual(len(self._detect(2)["level2"]), 2)
+
+    def test_min_children_one_keeps_single_child(self):
+        self.assertEqual(len(self._detect(1, min_children=1)["level2"]), 1)
+
+
 class TrackerStateTests(TestCase):
     def test_state_roundtrip_through_json_continues_ids(self):
         ids = lumen._IdCounter()
