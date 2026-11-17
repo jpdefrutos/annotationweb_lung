@@ -1,6 +1,7 @@
 import json
 import os
 from django.conf import settings
+from django.contrib.staticfiles import finders
 from django.db import transaction
 from django.shortcuts import render, redirect
 from django.http import JsonResponse
@@ -18,6 +19,20 @@ def _hex_to_rgb(hex_color):
     return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
 
 
+def _static_version(files):
+    """
+    Last-modified time of the given static files, appended to their URLs as
+    ?v=..., so browsers fetch a new copy after every change instead of running
+    a cached old version next to a new template.
+    """
+    times = []
+    for f in files:
+        path = finders.find(f)
+        if path:
+            times.append(int(os.path.getmtime(path)))
+    return max(times) if times else ''
+
+
 def process_next_image(request, task_id):
     return process_image(request, task_id, None)
 
@@ -27,6 +42,7 @@ def process_image(request, task_id, image_id):
         context = setup_task_context(request, task_id, Task.BRONCHOSCOPY_BOUNDING_BOX, image_id)
         context['javascript_files'] = ['bronchoscopy_boundingbox/bronchoscopy_boundingbox.js',
                                        'bronchoscopy_boundingbox/proposals.js']
+        context['static_version'] = _static_version(context['javascript_files'])
         context['boxes'] = BronchoscopyBoundingBox.objects.filter(image__in=context['frames'])
 
         frame_labels = {}

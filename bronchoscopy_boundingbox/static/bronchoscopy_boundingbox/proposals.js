@@ -15,6 +15,8 @@ var g_proposalState = null;    // tracker state from the last response, sent bac
 var g_selectedProposal = null;
 var g_proposalBusy = false;
 var g_overlapHideIou = 0.5;    // hide a suggestion that overlaps an accepted box this much
+var g_trackLetters = {};       // track key -> letter, so a track keeps its letter over frames
+var g_letterCounters = {};     // counter key -> how many letters handed out
 
 // ── settings and requests ────────────────────────────────────────────────────
 
@@ -150,6 +152,91 @@ function coveredByBox(p) {
     return false;
 }
 
+// ── suggested names ──────────────────────────────────────────────────────────
+//
+// A main box is named after the frame's branch from the subsequence
+// classification plus a letter: on branch "1,2,1" two openings become
+// "1,2,1,a" and "1,2,1,b". A nested box gets its parent's current name plus a
+// letter: "1,2,1,a,a", "1,2,1,a,b". The annotator then only replaces the
+// letters with numbers. A track keeps its letter over frames; new tracks on
+// the same branch (or parent) get the next unused letter, so names on one frame
+// never clash. Without tracking, letters are handed out per frame. Frames
+// without a subsequence label keep the server's temporary name (T7 / D3).
+
+// 0 -> a, 25 -> z, 26 -> aa, 27 -> ab ...
+function letterName(i) {
+    var s = '';
+    i += 1;
+    while (i > 0) {
+        var m = (i - 1) % 26;
+        s = String.fromCharCode(97 + m) + s;
+        i = Math.floor((i - 1) / 26);
+    }
+    return s;
+}
+
+function letterFor(counterKey, trackKey) {
+    if (!(trackKey in g_trackLetters)) {
+        var n = g_letterCounters[counterKey] || 0;
+        g_trackLetters[trackKey] = letterName(n);
+        g_letterCounters[counterKey] = n + 1;
+    }
+    return g_trackLetters[trackKey];
+}
+
+function frameBranch(frame_nr) {
+    var b = g_subsequenceLabels[String(frame_nr)];
+    return b ? String(b) : null;
+}
+
+// Current name of the parent of a nested box: the parent suggestion on the
+// same frame (renamed or not), or the box accepted from it. Linked by
+// (run_id, parent_id), never by name, so renaming cannot break the link.
+function parentName(p) {
+    if (p.level !== 2 || p.parent_id === null) return null;
+    var parent = { run_id: p.run_id, box_id: p.parent_id };
+    var list = g_proposals[p.frame_nr] || [];
+    for (var i = 0; i < list.length; i++)
+        if (sameTrack(list[i], parent)) return list[i].label;
+    var boxes = g_boxes[p.frame_nr] || [];
+    for (var j = 0; j < boxes.length; j++)
+        if (boxes[j].src && sameTrack(boxes[j].src, parent)) return boxes[j].label;
+    return null;
+}
+
+// Sets r.letter and returns the suggested name. parentLabels holds the names
+// of this response's main boxes ("frame|box_id" -> name), which may be hidden
+// and so not findable through parentName().
+function suggestedName(r, parentLabels) {
+    var tracked = r.label.charAt(0) === 'T';
+    var scope = r.run_id + (tracked ? '' : '|f' + r.frame_nr);
+    var trackKey = scope + '|' + r.box_id;
+    if (r.level === 1) {
+        var branch = frameBranch(r.frame_nr);
+        if (!branch) return r.label;
+        r.letter = letterFor(scope + '|branch|' + branch, branch + '|' + trackKey);
+        return branch + ',' + r.letter;
+    }
+    var parent = parentLabels[r.frame_nr + '|' + r.parent_id] || parentName(r) || ('T' + r.parent_id);
+    r.letter = letterFor(scope + '|parent|' + r.parent_id, trackKey);
+    return parent + ',' + r.letter;
+}
+
+// After a parent is renamed or accepted, its still-unnamed children follow:
+// parent "1,2,1,1" turns child "1,2,1,a,b" into "1,2,1,1,b".
+function refreshChildNames() {
+    for (var f in g_proposals) {
+        var list = g_proposals[f];
+        for (var i = 0; i < list.length; i++) {
+            var c = list[i];
+            if (c.level !== 2 || c.label !== c.placeholder || !c.letter) continue;
+            var pn = parentName(c);
+            if (!pn) continue;
+            c.label = c.placeholder = pn + ',' + c.letter;
+        }
+    }
+}
+
 // New suggestions for a frame replace any older, unaccepted ones on it, so
 // two runs never show overlapping placeholder names on the same frame. A
 // suggestion whose track was already named in an earlier frame (e.g. in the
@@ -158,13 +245,17 @@ function coveredByBox(p) {
 function storeProposals(rows, firstFrame, lastFrame) {
     var hidden = 0;
     var names = earlierTrackNames(firstFrame);
+    var parentLabels = {};
     for (var f = firstFrame; f <= lastFrame; f++)
         delete g_proposals[f];
     for (var i = 0; i < rows.length; i++) {
         var r = rows[i];
-        r.placeholder = r.label;
+        var tracked = r.label.charAt(0) === 'T';
+        r.placeholder = suggestedName(r, parentLabels);
+        r.label = r.placeholder;
         var key = r.run_id + '|' + r.box_id;
-        if (key in names) r.label = names[key];
+        if (tracked && key in names) r.label = names[key];
+        if (r.level === 1) parentLabels[r.frame_nr + '|' + r.box_id] = r.label;
         if (coveredByBox(r)) {
             hidden++;
             continue;
@@ -173,6 +264,7 @@ function storeProposals(rows, firstFrame, lastFrame) {
             g_proposals[r.frame_nr] = [];
         g_proposals[r.frame_nr].push(r);
     }
+    refreshChildNames();
     if (g_selectedProposal && !proposalExists(g_selectedProposal))
         selectProposal(null);
     return hidden;
@@ -217,23 +309,6 @@ function proposalAt(x, y) {
     return best;
 }
 
-// Current name of a level-2 proposal's parent: the parent suggestion on the
-// same frame, or the accepted box made from it. Linked by (run_id, parent_id),
-// never by name, so renaming cannot break the link.
-function parentName(p) {
-    if (p.level !== 2 || p.parent_id === null) return null;
-    var parent = { run_id: p.run_id, box_id: p.parent_id };
-    var list = g_proposals[p.frame_nr] || [];
-    for (var i = 0; i < list.length; i++)
-        if (sameTrack(list[i], parent))
-            return list[i].label !== list[i].placeholder ? list[i].label : null;
-    var boxes = g_boxes[p.frame_nr] || [];
-    for (var j = 0; j < boxes.length; j++)
-        if (boxes[j].src && sameTrack(boxes[j].src, parent))
-            return boxes[j].label;
-    return null;
-}
-
 // ── selection ────────────────────────────────────────────────────────────────
 
 function selectProposal(p) {
@@ -252,15 +327,13 @@ function selectProposal(p) {
             ' (' + track.length + ' boxes)';
     $('#selectedProposalInfo').html(info);
 
-    // Pre-fill: the name given so far; for an unnamed nested box, its parent's
-    // name, so e.g. "RB1" only needs a letter added to become "RB1a".
-    var name = p.label;
-    if (p.label === p.placeholder) {
-        var pn = parentName(p);
-        if (pn) name = pn;
-    }
-    $('#proposalName').val(name);
-    $('#proposalName').focus().select();
+    // Pre-fill the current name. For a suggested name, only its last part (the
+    // letter) is selected, so typing "1" turns "1,2,1,a" into "1,2,1,1".
+    var input = $('#proposalName');
+    input.val(p.label).focus();
+    var el = input[0];
+    var start = p.label === p.placeholder && p.letter ? p.label.lastIndexOf(',') + 1 : 0;
+    el.setSelectionRange(start, p.label.length);
     redrawSequence();
 }
 
@@ -317,6 +390,7 @@ function acceptSelectedProposal() {
         alert('This frame already has a box named "' + name + '" (or the box is too small).');
         return;
     }
+    refreshChildNames();
     rebuildLabelDropdown();
     redrawSequence();
 }
@@ -341,6 +415,7 @@ function renameSelectedTrack() {
     if (list.length > 1 && !confirm('Rename ' + describeRange(list) + ' to "' + name + '"?')) return;
     for (var i = 0; i < list.length; i++)
         list[i].label = name;
+    refreshChildNames();
     selectProposal(p);
 }
 
@@ -358,6 +433,7 @@ function acceptSelectedTrack() {
         if (!acceptProposalAs(list[i], name))
             skipped.push(list[i].frame_nr);
     }
+    refreshChildNames();
     rebuildLabelDropdown();
     redrawSequence();
     if (skipped.length > 0)
