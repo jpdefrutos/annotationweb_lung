@@ -1,37 +1,19 @@
 """
 Training-free lumen box proposals (detection + IoU tracking) for the
-bronchoscopy bounding box task.
+bronchoscopy bounding box task, adapted from the lumen scripts (lumen_core.py,
+detect_roi.py, preview_boxes.py). With min_children=1 and min_track_len=1 it
+gives the same boxes and box_ids as lumen_annotate.py.
 
-Adapted from the lumen scripts (lumen_core.py, detect_roi.py,
-preview_boxes.py). The detection and tracking code is kept identical so the
-web tool proposes the same boxes and box_ids as lumen_annotate.py for the same
-frames and settings. Differences from lumen_core:
+Per frame: K-means on intensity inside the scope image, the darkest cluster
+split into blobs gives the main (level-1) boxes; optionally K-means again
+inside each blob gives nested (level-2) boxes. An IoU tracker with Hungarian
+matching links boxes over frames. Additions for the web tool:
 
-  - Frames come from an ImageSequence (format with '#'), not from a patient
-    folder lookup, and the ROI/scope-mask cache lives in LUMEN_CACHE_DIR.
-  - Errors raise LumenError instead of calling sys.exit().
-  - Level-2 children are dropped unless their parent has at least
-    min_children of them (default 2; min_children=1 gives the scripts' result).
-  - With tracking, a main (level-1) box whose track appears in fewer than
-    min_track_len frames (default 2) is dropped as noise, with its children
-    (min_track_len=1 gives the scripts' result). Nested tracks are not
-    filtered. See Runner.process for how chunk edges are handled.
-  - The tracker state is a plain JSON-serialisable dict, so the browser can
-    hand it back with the next chunk and the tracks continue across requests
-    (Django keeps no Runner in memory between requests).
-
-Pipeline per frame
-------------------
-  Level 1   (after BronchoTop Module A, Tomasini et al., IROS 2026)
-            grayscale -> K-means on intensity inside the scope image (K=5) ->
-            darkest cluster -> connected blobs above min_area -> one box each.
-  Level 2   (optional, levels=2) K-means again inside each level-1 blob. The
-            darkest sub-cluster is split into blobs; each becomes a child box.
-            A parent's children are only kept if there are at least
-            min_children of them (default 2): a single nested opening is not
-            a real branching, so it is not proposed.
-  Tracking  (optional) IoU tracker with Hungarian matching, one tracker per
-            level sharing one ID counter. Tracks restart on a frame gap.
+  - nested boxes are kept only when a parent has >= min_children of them
+  - main boxes on tracks shorter than min_track_len frames are dropped as
+    noise (see Runner.process for chunk edges)
+  - the tracker state is JSON, so the browser can send it back with the next
+    chunk and the tracks continue across requests
 
 box_id is only unique within one run; identify a track by (run_id, box_id).
 """
@@ -40,12 +22,13 @@ import hashlib
 import os
 import secrets
 import time
-import zlib
-from dataclasses import dataclass, asdict, fields
+from dataclasses import dataclass, asdict
 
 import numpy as np
 from scipy import ndimage
 from scipy.optimize import linear_sum_assignment
+
+from common.metaimage import MetaImage
 
 L1_COLOR, L2_COLOR = "#ff9900", "#30e0e0"
 
@@ -130,38 +113,17 @@ def params_from_dict(d):
 # ── frames ────────────────────────────────────────────────────────────────────
 
 def read_mhd(path):
-    """
-    8-bit (H, W, C) array from a MetaImage .mhd/.raw(.zraw) pair. Only 2D
-    MET_UCHAR images are supported (the bronchoscopy video frames); anything
-    else, or a damaged file, raises LumenError with the file name.
-    """
+    """(H, W, C) uint8 array of an 8-bit .mhd frame, read with common.metaimage."""
     name = os.path.basename(path)
     try:
-        header = {}
-        with open(path) as f:
-            for line in f:
-                if "=" in line:
-                    k, v = line.split("=", 1)
-                    header[k.strip()] = v.strip()
-        etype = header.get("ElementType", "MET_UCHAR")
-        if etype != "MET_UCHAR":
-            raise LumenError(f"{name}: unsupported pixel type {etype} (only 8-bit frames)")
-        dims = list(map(int, header["DimSize"].split()))
-        if len(dims) != 2:
-            raise LumenError(f"{name}: expected a 2D image, got {len(dims)}D")
-        n_ch = int(header.get("ElementNumberOfChannels", 1))
-        raw_p = os.path.join(os.path.dirname(path), header["ElementDataFile"])
-        with open(raw_p, "rb") as f:
-            raw = f.read()
-        if header.get("CompressedData", "False").lower() == "true":
-            raw = zlib.decompress(raw)
-        if len(raw) != dims[0] * dims[1] * n_ch:
-            raise LumenError(f"{name}: image data has the wrong size")
-        return np.frombuffer(raw, dtype=np.uint8).reshape(dims[1], dims[0], n_ch)
-    except LumenError:
-        raise
-    except (OSError, KeyError, ValueError, zlib.error) as e:
+        image = MetaImage(filename=path)
+    except Exception as e:      # MetaImage raises plain Exception and parse errors
         raise LumenError(f"Could not read {name}: {e}")
+    etype = image.get_attribute("ElementType")
+    if etype != "MET_UCHAR":
+        raise LumenError(f"{name}: unsupported pixel type {etype} (only 8-bit frames)")
+    img = image.get_pixel_data()
+    return img if img.ndim == 3 else img[..., None]
 
 
 def sequence_frames(image_sequence):

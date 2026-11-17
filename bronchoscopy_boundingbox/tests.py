@@ -41,7 +41,10 @@ def _frame(dx, extras=()):
     return img
 
 
-class LumenProposalTests(TestCase):
+class SyntheticVideoTestCase(TestCase):
+    """A 10-frame fake video in a temp folder, a task and an annotator on it.
+    Subclasses set extras(f) to add dark disks to frame f."""
+
     @staticmethod
     def extras(f):
         return ()
@@ -84,6 +87,12 @@ class LumenProposalTests(TestCase):
         data.update(extra)
         return self.client.post('/bronchoscopy-bounding-box/propose/', data)
 
+    @staticmethod
+    def strip_run_id(rows):
+        return [{k: v for k, v in r.items() if k != 'run_id'} for r in rows]
+
+
+class LumenProposalTests(SyntheticVideoTestCase):
     def test_detects_both_lumens_and_tracks_them_across_chunks(self):
         r1 = self._propose(0, 5).json()
         self.assertTrue(r1['success'], r1)
@@ -102,8 +111,7 @@ class LumenProposalTests(TestCase):
         whole = self._propose(0, 10).json()['rows']
         a = self._propose(0, 4).json()
         b = self._propose(4, 6, state=a['state']).json()
-        strip = lambda rows: [{k: v for k, v in r.items() if k != 'run_id'} for r in rows]
-        self.assertEqual(strip(a['rows'] + b['rows']), strip(whole))
+        self.assertEqual(self.strip_run_id(a['rows'] + b['rows']), self.strip_run_id(whole))
 
     def test_changed_params_start_a_new_run(self):
         r1 = self._propose(0, 3).json()
@@ -124,10 +132,6 @@ class LumenProposalTests(TestCase):
         self.assertEqual(self._propose(0, 1, params={'levels': 3}).status_code, 400)
         self.assertEqual(self._propose(0, 1, params={'min_area': 'abc'}).status_code, 400)
 
-    def test_garbage_state_starts_a_new_run(self):
-        r = self._propose(0, 2, state={'run_id': 1, 'tracks': 'x'}).json()
-        self.assertTrue(r['success'], r)
-
     def test_user_not_on_task_is_refused(self):
         other = User.objects.create_user('other', password='x')
         self.client.force_login(other)
@@ -147,9 +151,9 @@ class LumenProposalTests(TestCase):
         self.assertEqual(self._propose(0, 1, params={'min_track_len': 6}).status_code, 400)
         self.assertEqual(self._propose(0, 1, params={'max_lost': 10, 'min_track_len': 5}).status_code, 200)
 
-    def test_malformed_state_with_matching_params_starts_a_new_run(self):
+    def test_malformed_state_starts_a_new_run(self):
         good = self._propose(0, 2).json()['state']
-        for bad in ({'prev': 'a'}, {'tracks': {'1': {'1': {'box': [1, 2], 'lost': 0}}}},
+        for bad in ({'run_id': 1}, {'prev': 'a'}, {'tracks': {'1': {'1': {'box': [1, 2], 'lost': 0}}}},
                     {'tracks': 'x'}, {'next_id': 'x'}):
             r = self._propose(2, 2, state=dict(good, **bad))
             self.assertEqual(r.status_code, 200, bad)
@@ -212,10 +216,9 @@ class LumenProposalTests(TestCase):
         self.assertEqual(r.json()['message'], 'Box suggestions failed: RuntimeError: boom')
 
 
-class SingleFrameTrackTests(LumenProposalTests):
+class SingleFrameTrackTests(SyntheticVideoTestCase):
     """A lumen in frames 3-4 only (kept, also when a chunk ends at frame 3) and a
-    blip in frame 6 only (dropped as noise). Inherits and reruns every test
-    above on this video, with the expected counts overridden below."""
+    blip in frame 6 only (dropped as noise)."""
     PAIR = (170, 200, 22)       # frames 3 and 4
     BLIP = (270, 200, 22)       # frame 6 only
 
@@ -223,9 +226,6 @@ class SingleFrameTrackTests(LumenProposalTests):
     def extras(f):
         return ([SingleFrameTrackTests.PAIR] if f in (3, 4) else []) + \
                ([SingleFrameTrackTests.BLIP] if f == 6 else [])
-
-    def test_detects_both_lumens_and_tracks_them_across_chunks(self):
-        pass                    # counts differ on this video; covered below
 
     def _boxes_at(self, rows, cx, cy):
         return [r for r in rows if r['x'] <= cx <= r['x'] + r['width']
@@ -237,6 +237,15 @@ class SingleFrameTrackTests(LumenProposalTests):
         pair = self._boxes_at(r['rows'], 170, 200)
         self.assertEqual(sorted(b['frame_nr'] for b in pair), [3, 4])
         self.assertEqual(r['dropped'], 1)
+
+    def test_chunked_equals_single_run_with_short_tracks(self):
+        # the look-ahead past each chunk must give the same result as one run
+        whole = self._propose(0, 10).json()['rows']
+        a = self._propose(0, 4).json()
+        b = self._propose(4, 3, state=a['state']).json()
+        c = self._propose(7, 3, state=b['state']).json()
+        self.assertEqual(self.strip_run_id(a['rows'] + b['rows'] + c['rows']),
+                         self.strip_run_id(whole))
 
     def test_track_split_over_chunk_boundary_is_kept(self):
         a = self._propose(0, 4).json()          # frames 0-3: pair only in frame 3 here
