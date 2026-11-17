@@ -74,18 +74,20 @@ function setupSegmentation() {
         g_BBx = pos.x;
         g_BBy = pos.y;
         var inside = isInsideBox(pos.x, pos.y);
+        // A suggestion smaller than the box under the cursor (e.g. a nested
+        // child inside an accepted parent) wins, so it can be selected without
+        // moving the parent first (proposals.js)
+        var proposal = proposalUnderCursor(pos.x, pos.y, inside);
+        if (proposal) {
+            selectProposal(proposal);
+            return;
+        }
         if (inside.isInside) {
             g_currentBox = inside.boxNr;
             if (inside.isInsideCorner)
                 g_resize = true;
             else
                 g_move = true;
-            return;
-        }
-        // Clicking a suggestion selects it (proposals.js) instead of drawing
-        var proposal = proposalAt(pos.x, pos.y);
-        if (proposal) {
-            selectProposal(proposal);
             return;
         }
         if (g_selectedProposal)
@@ -142,10 +144,11 @@ function setupSegmentation() {
     $('#canvas').dblclick(function(e) {
         var pos = mousePos(e, this);
         var inside = isInsideBox(pos.x, pos.y);
-        if (inside.isInside)
+        var proposal = proposalUnderCursor(pos.x, pos.y, inside);
+        if (proposal)
+            rejectProposal(proposal);
+        else if (inside.isInside)
             removeBox(inside.boxNr);
-        else
-            rejectProposalAt(pos.x, pos.y);
     });
 
     // Ctrl+D: delete the box under the mouse pointer (alternative to double-click)
@@ -158,10 +161,11 @@ function setupSegmentation() {
             if (g_hoverX === null || g_hoverY === null)
                 return;
             var inside = isInsideBox(g_hoverX, g_hoverY);
-            if (inside.isInside)
+            var proposal = proposalUnderCursor(g_hoverX, g_hoverY, inside);
+            if (proposal)
+                rejectProposal(proposal);
+            else if (inside.isInside)
                 removeBox(inside.boxNr);
-            else
-                rejectProposalAt(g_hoverX, g_hoverY);
         }
     });
 

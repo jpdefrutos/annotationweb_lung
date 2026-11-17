@@ -14,6 +14,7 @@ var g_proposals = {};          // frame_nr -> [proposal]
 var g_proposalState = null;    // tracker state from the last response, sent back with the next chunk
 var g_selectedProposal = null;
 var g_proposalBusy = false;
+var g_overlapHideIou = 0.5;    // hide a suggestion that overlaps an accepted box this much
 
 // ── settings and requests ────────────────────────────────────────────────────
 
@@ -51,7 +52,7 @@ function setProposalStatus(text, isError) {
 
 function requestProposals(startFrame) {
     if (g_proposalBusy || g_imageSequenceID === null) return;
-    var count = parseInt($('#propCount').val(), 10) || 30;
+    var count = parseInt($('#propCount').val(), 10) || 60;
     g_proposalBusy = true;
     $('#proposeButton, #proposeNextButton').prop('disabled', true);
     setProposalStatus('Finding boxes in frames ' + startFrame + '–' + (startFrame + count - 1) +
@@ -76,12 +77,13 @@ function requestProposals(startFrame) {
         }
         var continued = g_proposalState && data.state.run_id === g_proposalState.run_id;
         g_proposalState = data.state;
-        storeProposals(data.rows, data.frames[0], data.frames[1]);
-        var n = data.rows.length;
+        var hidden = storeProposals(data.rows, data.frames[0], data.frames[1]);
+        var n = data.rows.length - hidden;
         setProposalStatus(n + ' suggestion' + (n === 1 ? '' : 's') + ' in frames ' +
             data.frames[0] + '–' + data.frames[1] +
             (continued ? ' (tracks continued)' : ' (new run ' + data.state.run_id + ')') + '.' +
-            (data.dropped ? ' ' + data.dropped + ' box(es) on short tracks were left out.' : ''));
+            (data.dropped ? ' ' + data.dropped + ' box(es) on short tracks were left out.' : '') +
+            (hidden ? ' ' + hidden + ' hidden because they overlap a box you already have.' : ''));
         if (startFrame !== g_currentFrameNr)
             goToCopiedFrame(startFrame);
         else
@@ -131,11 +133,30 @@ function earlierTrackNames(firstFrame) {
     return names;
 }
 
+function iou(a, b) {
+    var iw = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x);
+    var ih = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y);
+    if (iw <= 0 || ih <= 0) return 0;
+    var inter = iw * ih;
+    return inter / (a.width * a.height + b.width * b.height - inter);
+}
+
+// True if the suggestion overlaps a box already on its frame (accepted, drawn
+// by hand or loaded from an earlier save) with IoU >= g_overlapHideIou.
+function coveredByBox(p) {
+    var boxes = g_boxes[p.frame_nr] || [];
+    for (var i = 0; i < boxes.length; i++)
+        if (iou(p, boxes[i]) >= g_overlapHideIou) return true;
+    return false;
+}
+
 // New suggestions for a frame replace any older, unaccepted ones on it, so
 // two runs never show overlapping placeholder names on the same frame. A
 // suggestion whose track was already named in an earlier frame (e.g. in the
-// previous chunk) gets that name, so a track is only named once.
+// previous chunk) gets that name, so a track is only named once. Suggestions
+// on top of an existing box are not shown. Returns how many were hidden.
 function storeProposals(rows, firstFrame, lastFrame) {
+    var hidden = 0;
     var names = earlierTrackNames(firstFrame);
     for (var f = firstFrame; f <= lastFrame; f++)
         delete g_proposals[f];
@@ -144,12 +165,17 @@ function storeProposals(rows, firstFrame, lastFrame) {
         r.placeholder = r.label;
         var key = r.run_id + '|' + r.box_id;
         if (key in names) r.label = names[key];
+        if (coveredByBox(r)) {
+            hidden++;
+            continue;
+        }
         if (!(r.frame_nr in g_proposals))
             g_proposals[r.frame_nr] = [];
         g_proposals[r.frame_nr].push(r);
     }
     if (g_selectedProposal && !proposalExists(g_selectedProposal))
         selectProposal(null);
+    return hidden;
 }
 
 // ── lookup ───────────────────────────────────────────────────────────────────
@@ -349,11 +375,21 @@ function rejectSelectedTrack() {
     redrawSequence();
 }
 
-function rejectProposalAt(x, y) {
-    var p = proposalAt(x, y);
-    if (!p) return;
+function rejectProposal(p) {
     removeProposal(p);
     redrawSequence();
+}
+
+// The suggestion a click at (x, y) should go to, or null if it belongs to the
+// box under the cursor (`inside` from isInsideBox). The smaller one wins, so a
+// nested suggestion inside an accepted parent can be clicked directly, while
+// the rest of the parent still moves it. The box's resize corner always wins.
+function proposalUnderCursor(x, y, inside) {
+    var p = proposalAt(x, y);
+    if (!p || !inside.isInside) return p;
+    if (inside.isInsideCorner) return null;
+    var box = g_boxes[g_currentFrameNr][inside.boxNr];
+    return p.width * p.height < box.width * box.height ? p : null;
 }
 
 function acceptAllProposalsInFrame() {

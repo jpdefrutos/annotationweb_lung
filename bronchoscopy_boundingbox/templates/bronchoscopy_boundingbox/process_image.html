@@ -13,63 +13,6 @@
     <button type="button" id="renameLabelButton" style="margin-top: 4px;"
             title="Rename this label on every box in the current video">Rename label</button>
 </div>
-<fieldset id="proposalPanel" style="margin-bottom: 8px; padding: 6px;">
-    <legend><strong>Box suggestions</strong></legend>
-    <div class="proposal-row">
-        <label>Frames <input type="number" id="propCount" value="30" min="1" max="300" style="width: 5em;"></label>
-        <label>Levels
-            <select id="propLevels">
-                <option value="1">1 (main openings)</option>
-                <option value="2" selected>1 + 2 (also nested)</option>
-            </select>
-        </label>
-    </div>
-    <div class="proposal-row">
-        <label title="Min blob size, fraction of the scope image">min_area <input type="number" id="propMinArea" value="0.005" step="0.001" min="0" max="1" style="width: 5em;"></label>
-    </div>
-    <div class="proposal-row prop-level2">
-        <label title="Nested opening must be this many grey levels darker">min_gap <input type="number" id="propMinGap" value="10" step="1" min="0" max="255" style="width: 4em;"></label>
-        <label title="Min child size, fraction of its parent">child_min <input type="number" id="propChildMin" value="0.03" step="0.01" min="0" max="1" style="width: 4.5em;"></label>
-    </div>
-    <div class="proposal-row">
-        <label><input type="checkbox" id="propTrack" checked> Track over frames</label>
-    </div>
-    <div class="proposal-row prop-track">
-        <label title="Min IoU to continue a level-1 track">track_iou <input type="number" id="propTrackIou" value="0.45" step="0.05" min="0" max="1" style="width: 4.5em;"></label>
-        <label class="prop-level2" title="Min IoU to continue a level-2 track">track_iou2 <input type="number" id="propTrackIou2" value="0.3" step="0.05" min="0" max="1" style="width: 4.5em;"></label>
-        <label title="Frames a track survives without a match">max_lost <input type="number" id="propMaxLost" value="1" step="1" min="0" max="100" style="width: 3.5em;"></label>
-        <label title="Main boxes whose track is in fewer frames than this are left out as noise (1 = keep all). Nested boxes are not filtered.">min_track_len (main) <input type="number" id="propMinTrackLen" value="2" step="1" min="1" max="10" style="width: 3.5em;"></label>
-    </div>
-    <div class="proposal-row">
-        <button type="button" id="proposeButton" title="Suggest boxes for the next N frames, starting at the current frame">Suggest from current frame</button>
-        <button type="button" id="proposeNextButton" disabled title="Continue the tracks with the next N frames">Next chunk</button>
-    </div>
-    <div class="proposal-row">
-        <button type="button" id="acceptFrameProposalsButton" title="Accept every suggestion on this frame with its current name">Accept all in frame</button>
-        <button type="button" id="clearProposalsButton">Clear suggestions</button>
-    </div>
-    <div id="proposalStatus" style="font-size: 0.9em; margin-top: 4px;"></div>
-
-    <div id="selectedProposalPanel" style="margin-top: 6px; padding-top: 6px; border-top: 1px solid #666;">
-        <div id="selectedProposalInfo" style="font-size: 0.9em;"><i>Click a dashed suggestion box in the image to select it.</i></div>
-        <label for="proposalName"><strong>Name:</strong></label>
-        <input type="text" id="proposalName" style="width: 100%; margin-top: 2px; padding: 4px 6px; box-sizing: border-box;">
-        <label style="font-size: 0.9em;"><input type="checkbox" id="proposalFromHere" checked> Track actions only from this frame onward</label>
-        <div class="proposal-row">
-            <button type="button" id="acceptProposalButton" title="Ctrl+Enter">Accept</button>
-            <button type="button" id="rejectProposalButton" title="Double-click or Ctrl+D on the suggestion">Reject</button>
-        </div>
-        <div class="proposal-row">
-            <button type="button" id="renameTrackButton" title="Give every suggestion in this track the name above">Rename track</button>
-            <button type="button" id="acceptTrackButton" title="Accept every suggestion in this track with the name above">Accept track</button>
-            <button type="button" id="rejectTrackButton">Reject track</button>
-        </div>
-    </div>
-</fieldset>
-<style>
-    #proposalPanel .proposal-row { margin-top: 4px; }
-    #proposalPanel .proposal-row label { margin-right: 6px; white-space: nowrap; }
-</style>
 {% endblock label_buttons %}
 
 {% block task_javascript %}
@@ -114,6 +57,70 @@ loadBBTask({{ image_sequence.id }});
 <div style="margin-top: 6px;">
     <strong>Current branch:</strong> <span id="subsequenceLabel">N/A</span>
 </div>
+<fieldset id="proposalPanel" style="margin-top: 8px; padding: 6px;">
+    <legend><strong>Box suggestions</strong></legend>
+    <div class="proposal-columns">
+    <div class="proposal-settings">
+    <div class="proposal-row">
+        <label>Frames <input type="number" id="propCount" value="60" min="1" max="300" style="width: 5em;"></label>
+        <label>Levels
+            <select id="propLevels">
+                <option value="1">1 (main openings)</option>
+                <option value="2" selected>1 + 2 (also nested)</option>
+            </select>
+        </label>
+    </div>
+    <div class="proposal-row">
+        <label title="Min blob size, fraction of the scope image">min_area <input type="number" id="propMinArea" value="0.005" step="0.001" min="0" max="1" style="width: 5em;"></label>
+    </div>
+    <div class="proposal-row prop-level2">
+        <label title="Nested opening must be this many grey levels darker">min_gap <input type="number" id="propMinGap" value="10" step="1" min="0" max="255" style="width: 4em;"></label>
+        <label title="Min child size, fraction of its parent">child_min <input type="number" id="propChildMin" value="0.03" step="0.01" min="0" max="1" style="width: 4.5em;"></label>
+    </div>
+    <div class="proposal-row">
+        <label><input type="checkbox" id="propTrack" checked> Track over frames</label>
+    </div>
+    <div class="proposal-row prop-track">
+        <label title="Min IoU to continue a level-1 track">track_iou <input type="number" id="propTrackIou" value="0.45" step="0.05" min="0" max="1" style="width: 4.5em;"></label>
+        <label class="prop-level2" title="Min IoU to continue a level-2 track">track_iou2 <input type="number" id="propTrackIou2" value="0.3" step="0.05" min="0" max="1" style="width: 4.5em;"></label>
+        <label title="Frames a track survives without a match">max_lost <input type="number" id="propMaxLost" value="1" step="1" min="0" max="100" style="width: 3.5em;"></label>
+        <label title="Main boxes whose track is in fewer frames than this are left out as noise (1 = keep all). Nested boxes are not filtered.">min_track_len (main) <input type="number" id="propMinTrackLen" value="2" step="1" min="1" max="10" style="width: 3.5em;"></label>
+    </div>
+    <div class="proposal-row">
+        <button type="button" id="proposeButton" title="Suggest boxes for the next N frames, starting at the current frame">Suggest from current frame</button>
+        <button type="button" id="proposeNextButton" disabled title="Continue the tracks with the next N frames">Next chunk</button>
+    </div>
+    <div class="proposal-row">
+        <button type="button" id="acceptFrameProposalsButton" title="Accept every suggestion on this frame with its current name">Accept all in frame</button>
+        <button type="button" id="clearProposalsButton">Clear suggestions</button>
+    </div>
+    <div id="proposalStatus" style="font-size: 0.9em; margin-top: 4px;"></div>
+    </div>
+
+    <div id="selectedProposalPanel">
+        <div id="selectedProposalInfo" style="font-size: 0.9em;"><i>Click a dashed suggestion box in the image to select it.</i></div>
+        <label for="proposalName"><strong>Name:</strong></label>
+        <input type="text" id="proposalName" style="width: 100%; margin-top: 2px; padding: 4px 6px; box-sizing: border-box;">
+        <label style="font-size: 0.9em;"><input type="checkbox" id="proposalFromHere" checked> Track actions only from this frame onward</label>
+        <div class="proposal-row">
+            <button type="button" id="acceptProposalButton" title="Ctrl+Enter">Accept</button>
+            <button type="button" id="rejectProposalButton" title="Double-click or Ctrl+D on the suggestion">Reject</button>
+        </div>
+        <div class="proposal-row">
+            <button type="button" id="renameTrackButton" title="Give every suggestion in this track the name above">Rename track</button>
+            <button type="button" id="acceptTrackButton" title="Accept every suggestion in this track with the name above">Accept track</button>
+            <button type="button" id="rejectTrackButton">Reject track</button>
+        </div>
+    </div>
+    </div>
+</fieldset>
+<style>
+    #proposalPanel .proposal-row { margin-top: 4px; }
+    #proposalPanel .proposal-row label { margin-right: 6px; white-space: nowrap; }
+    #proposalPanel .proposal-columns { display: flex; flex-wrap: wrap; gap: 16px; }
+    #proposalPanel .proposal-settings { flex: 1 1 340px; }
+    #proposalPanel #selectedProposalPanel { flex: 1 1 280px; padding-left: 16px; border-left: 1px solid #666; }
+</style>
 {% endblock task_content %}
 
 {% block task_instructions %}{% endblock task_instructions %}
