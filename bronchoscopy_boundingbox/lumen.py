@@ -100,8 +100,10 @@ PARAM_LIMITS = {
     "track": (bool, None, None),
     "track_iou": (float, 0.0, 1.0),
     "track_iou2": (float, 0.0, 1.0),
-    "max_lost": (int, 0, 100),
-    "min_track_len": (int, 1, 10),
+    # max_lost and min_track_len together set the look-ahead past each chunk,
+    # (min_track_len - 1) * (max_lost + 1) frames: at most 44 with these limits.
+    "max_lost": (int, 0, 10),
+    "min_track_len": (int, 1, 5),
 }
 
 
@@ -128,21 +130,38 @@ def params_from_dict(d):
 # ── frames ────────────────────────────────────────────────────────────────────
 
 def read_mhd(path):
-    """8-bit (H, W, C) array from a MetaImage .mhd/.raw(.zraw) pair."""
-    header = {}
-    with open(path) as f:
-        for line in f:
-            if "=" in line:
-                k, v = line.split("=", 1)
-                header[k.strip()] = v.strip()
-    dims = list(map(int, header["DimSize"].split()))
-    n_ch = int(header.get("ElementNumberOfChannels", 1))
-    raw_p = os.path.join(os.path.dirname(path), header["ElementDataFile"])
-    with open(raw_p, "rb") as f:
-        raw = f.read()
-    if header.get("CompressedData", "False").lower() == "true":
-        raw = zlib.decompress(raw)
-    return np.frombuffer(raw, dtype=np.uint8).reshape(dims[1], dims[0], n_ch)
+    """
+    8-bit (H, W, C) array from a MetaImage .mhd/.raw(.zraw) pair. Only 2D
+    MET_UCHAR images are supported (the bronchoscopy video frames); anything
+    else, or a damaged file, raises LumenError with the file name.
+    """
+    name = os.path.basename(path)
+    try:
+        header = {}
+        with open(path) as f:
+            for line in f:
+                if "=" in line:
+                    k, v = line.split("=", 1)
+                    header[k.strip()] = v.strip()
+        etype = header.get("ElementType", "MET_UCHAR")
+        if etype != "MET_UCHAR":
+            raise LumenError(f"{name}: unsupported pixel type {etype} (only 8-bit frames)")
+        dims = list(map(int, header["DimSize"].split()))
+        if len(dims) != 2:
+            raise LumenError(f"{name}: expected a 2D image, got {len(dims)}D")
+        n_ch = int(header.get("ElementNumberOfChannels", 1))
+        raw_p = os.path.join(os.path.dirname(path), header["ElementDataFile"])
+        with open(raw_p, "rb") as f:
+            raw = f.read()
+        if header.get("CompressedData", "False").lower() == "true":
+            raw = zlib.decompress(raw)
+        if len(raw) != dims[0] * dims[1] * n_ch:
+            raise LumenError(f"{name}: image data has the wrong size")
+        return np.frombuffer(raw, dtype=np.uint8).reshape(dims[1], dims[0], n_ch)
+    except LumenError:
+        raise
+    except (OSError, KeyError, ValueError, zlib.error) as e:
+        raise LumenError(f"Could not read {name}: {e}")
 
 
 def sequence_frames(image_sequence):
@@ -263,10 +282,10 @@ def roi_and_mask(frames, cache_dir, cache_key, erode=5):
 
     cache = os.path.join(cache_dir, f"{cache_key}_scope.npz")
     if os.path.isfile(cache):
-        z = np.load(cache)
-        roi = dict(zip(("left", "right", "top", "bottom"),
-                       (int(v) for v in z["roi"])))
-        raw = z["mask"]
+        with np.load(cache) as z:
+            roi = dict(zip(("left", "right", "top", "bottom"),
+                           (int(v) for v in z["roi"])))
+            raw = z["mask"]
     else:
         missing = [p for p in paths if not os.path.isfile(p)]
         if missing:
@@ -479,9 +498,13 @@ class IoUTracker:
 
     @staticmethod
     def load_tracks(d):
-        return {int(t): {"box": tuple(int(v) for v in x["box"]), "lost": int(x["lost"]),
-                         "n": int(x.get("n", 1))}
-                for t, x in (d or {}).items()}
+        out = {}
+        for t, x in (d or {}).items():
+            box = tuple(int(v) for v in x["box"])
+            if len(box) != 4:
+                raise ValueError("track box must have 4 values")
+            out[int(t)] = {"box": box, "lost": int(x["lost"]), "n": int(x.get("n", 1))}
+        return out
 
 
 # ── runner ────────────────────────────────────────────────────────────────────
@@ -502,13 +525,17 @@ class Runner:
     def __init__(self, frames, roi, mask, params, state=None):
         self.frames, self.roi, self.mask, self.p = frames, roi, mask, params
         self.dropped = 0        # boxes dropped by min_track_len in the last process()
-        self._load(state if self._compatible(state, params) else None)
+        try:
+            self._load(state if self._compatible(state, params) else None)
+        except (KeyError, TypeError, ValueError, AttributeError):
+            self._load(None)        # malformed state from the browser: new run
 
     def _load(self, state):
         params = self.p
         if state:
             self.run_id = state["run_id"]
-            self.prev = state.get("prev")
+            prev = state.get("prev")
+            self.prev = None if prev is None else int(prev)
             self._ids = _IdCounter(int(state["next_id"]))
             t1 = IoUTracker.load_tracks(state["tracks"].get("1"))
             t2 = IoUTracker.load_tracks(state["tracks"].get("2"))
@@ -532,13 +559,21 @@ class Runner:
                 "next_id": self._ids.next_id,
                 "tracks": {"1": self.trackers[1].dump(), "2": self.trackers[2].dump()}}
 
+    def _check_size(self, img, f):
+        """The frame must fit the scope mask estimated from the rest of the video."""
+        if crop(img, self.roi).shape[:2] != self.mask.shape:
+            raise LumenError(f"Frame {f} has a different size than the rest of the video "
+                             f"({img.shape[1]}x{img.shape[0]})")
+
     def frame(self, f):
         """Rows (box dicts) for one frame. Call in increasing frame order."""
         p = self.p
         path = self.frames.get(f)
         if path is None or not os.path.isfile(path):
             raise LumenError(f"Frame {f} not found")
-        det = detect(read_mhd(path), self.roi, self.mask, p)
+        img = read_mhd(path)
+        self._check_size(img, f)
+        det = detect(img, self.roi, self.mask, p)
         l1, l2 = det["level1"], det["level2"]
         if p.track:
             if self.prev is None or f != self.prev + 1:

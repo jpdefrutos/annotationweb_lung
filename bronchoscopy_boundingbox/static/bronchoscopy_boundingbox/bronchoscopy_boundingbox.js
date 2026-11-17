@@ -73,11 +73,13 @@ function setupSegmentation() {
         var pos = mousePos(e, this);
         g_BBx = pos.x;
         g_BBy = pos.y;
-        var inside = isInsideBox(pos.x, pos.y);
+        // Shift+drag always draws a new box, even on top of a suggestion or an
+        // existing box (which would otherwise be selected or moved)
+        var inside = e.shiftKey ? { isInside: false } : isInsideBox(pos.x, pos.y);
         // A suggestion smaller than the box under the cursor (e.g. a nested
         // child inside an accepted parent) wins, so it can be selected without
         // moving the parent first (proposals.js)
-        var proposal = proposalUnderCursor(pos.x, pos.y, inside);
+        var proposal = e.shiftKey ? null : proposalUnderCursor(pos.x, pos.y, inside);
         if (proposal) {
             selectProposal(proposal);
             return;
@@ -154,8 +156,7 @@ function setupSegmentation() {
     // Ctrl+D: delete the box under the mouse pointer (alternative to double-click)
     $(document).keydown(function(e) {
         if (e.ctrlKey && e.which === 68) {
-            var tag = e.target.tagName;
-            if (tag === 'INPUT' || tag === 'TEXTAREA')
+            if (typingInField(e))
                 return;
             e.preventDefault();
             if (g_hoverX === null || g_hoverY === null)
@@ -172,8 +173,7 @@ function setupSegmentation() {
     // Ctrl+Z: undo the last added or deleted box
     $(document).keydown(function(e) {
         if (e.ctrlKey && e.which === 90) {
-            var tag = e.target.tagName;
-            if (tag === 'INPUT' || tag === 'TEXTAREA')
+            if (typingInField(e))
                 return;
             e.preventDefault();
             undoLastBoxAction();
@@ -242,6 +242,15 @@ function setupSegmentation() {
     });
 
     try { redrawSequence(); } catch(e) {}
+}
+
+// True while the user is typing in a text field, where Ctrl+D / Ctrl+Z should
+// keep their normal meaning - except the suggestion Name field, which gets
+// focus whenever a suggestion is selected, so the box shortcuts keep working.
+function typingInField(e) {
+    var t = e.target;
+    if (t.id === 'proposalName') return false;
+    return t.tagName === 'INPUT' || t.tagName === 'TEXTAREA';
 }
 
 function isInsideBox(x, y) {
@@ -393,7 +402,8 @@ function renameSelectedLabel() {
             if (g_boxes[rf][ri].label === oldLabel) renameCount++;
     }
     if (renameCount === 0) {
-        alert('No box named "' + oldLabel + '" on frame ' + fromFrame + ' or later.');
+        alert('No box named "' + oldLabel + '"' +
+            (fromFrame === null ? ' in this video.' : ' on frame ' + fromFrame + ' or later.'));
         return;
     }
 

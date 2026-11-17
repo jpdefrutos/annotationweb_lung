@@ -101,9 +101,11 @@ function requestProposals(startFrame) {
     });
 }
 
+// g_sequenceLength is end - start with an inclusive end (annotationweb.js), so
+// the last loaded frame is g_startFrame + g_sequenceLength.
 function canContinueProposals() {
     return g_proposalState !== null && g_proposalState.prev !== null &&
-        g_proposalState.prev + 1 < g_startFrame + g_sequenceLength;
+        g_proposalState.prev + 1 <= g_startFrame + g_sequenceLength;
 }
 
 // Names already given to tracks, from frames before firstFrame: the name on

@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 from django.conf import settings
 from django.contrib.staticfiles import finders
@@ -11,6 +12,8 @@ from common.task import setup_task_context, save_annotation, NoMoreImages
 from common.label import get_or_create_task_label
 from .models import BronchoscopyBoundingBox
 from . import lumen
+
+logger = logging.getLogger(__name__)
 from subsequence_classification.models import SubsequenceLabel
 
 
@@ -150,6 +153,13 @@ def propose_boxes(request):
         rows = runner.process(range(start, end + 1))
     except lumen.LumenError as e:
         return JsonResponse({'success': False, 'message': str(e)}, status=400)
+    except Exception as e:
+        # Anything unexpected still reaches the panel as a readable message
+        # instead of a bare HTML 500; the traceback goes to the server log.
+        logger.exception('Box suggestions failed for sequence %s', sequence.pk)
+        return JsonResponse({'success': False,
+                             'message': 'Box suggestions failed: %s: %s' % (type(e).__name__, e)},
+                            status=500)
 
     return JsonResponse({'success': True, 'rows': rows, 'state': runner.state(),
                          'frames': [start, end], 'dropped': runner.dropped})

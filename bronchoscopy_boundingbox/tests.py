@@ -142,6 +142,75 @@ class LumenProposalTests(TestCase):
     def test_get_not_allowed(self):
         self.assertEqual(self.client.get('/bronchoscopy-bounding-box/propose/').status_code, 405)
 
+    def test_look_ahead_settings_are_limited(self):
+        self.assertEqual(self._propose(0, 1, params={'max_lost': 11}).status_code, 400)
+        self.assertEqual(self._propose(0, 1, params={'min_track_len': 6}).status_code, 400)
+        self.assertEqual(self._propose(0, 1, params={'max_lost': 10, 'min_track_len': 5}).status_code, 200)
+
+    def test_malformed_state_with_matching_params_starts_a_new_run(self):
+        good = self._propose(0, 2).json()['state']
+        for bad in ({'prev': 'a'}, {'tracks': {'1': {'1': {'box': [1, 2], 'lost': 0}}}},
+                    {'tracks': 'x'}, {'next_id': 'x'}):
+            r = self._propose(2, 2, state=dict(good, **bad))
+            self.assertEqual(r.status_code, 200, bad)
+            self.assertTrue(r.json()['success'], bad)
+
+    def test_unsupported_frame_gives_readable_error(self):
+        path = os.path.join(self.frame_dir, 'seq_5.mhd')
+        original = open(path).read()
+        try:
+            with open(path, 'w') as f:
+                f.write(original.replace('MET_UCHAR', 'MET_USHORT'))
+            r = self._propose(5, 1)
+            self.assertEqual(r.status_code, 400)
+            self.assertIn('unsupported pixel type MET_USHORT', r.json()['message'])
+        finally:
+            with open(path, 'w') as f:
+                f.write(original)
+
+    def test_damaged_frame_gives_readable_error(self):
+        raw = os.path.join(self.frame_dir, 'seq_6.zraw')
+        original = open(raw, 'rb').read()
+        try:
+            with open(raw, 'wb') as f:
+                f.write(b'not zlib')
+            r = self._propose(6, 1)
+            self.assertEqual(r.status_code, 400)
+            self.assertIn('Could not read seq_6.mhd', r.json()['message'])
+        finally:
+            with open(raw, 'wb') as f:
+                f.write(original)
+
+    def test_frame_of_other_size_gives_readable_error(self):
+        self._propose(0, 1)                       # builds the scope-mask cache
+        path = os.path.join(self.frame_dir, 'seq_7.mhd')
+        original = open(path).read()
+        raw = os.path.join(self.frame_dir, 'seq_7.zraw')
+        original_raw = open(raw, 'rb').read()
+        try:
+            small = np.zeros((100, 120, 3), np.uint8)
+            data = zlib.compress(small.tobytes())
+            with open(raw, 'wb') as f:
+                f.write(data)
+            with open(path, 'w') as f:
+                f.write(original.replace('DimSize = %d %d' % (W, H), 'DimSize = 120 100'))
+            r = self._propose(7, 1)
+            self.assertEqual(r.status_code, 400)
+            self.assertIn('different size', r.json()['message'])
+        finally:
+            with open(path, 'w') as f:
+                f.write(original)
+            with open(raw, 'wb') as f:
+                f.write(original_raw)
+
+    def test_unexpected_error_returns_json(self):
+        from unittest import mock
+        with mock.patch.object(lumen, 'detect', side_effect=RuntimeError('boom')), \
+                self.assertLogs('bronchoscopy_boundingbox.views', level='ERROR'):
+            r = self._propose(0, 1)
+        self.assertEqual(r.status_code, 500)
+        self.assertEqual(r.json()['message'], 'Box suggestions failed: RuntimeError: boom')
+
 
 class SingleFrameTrackTests(LumenProposalTests):
     """A lumen in frames 3-4 only (kept, also when a chunk ends at frame 3) and a
@@ -194,7 +263,8 @@ class MainBoxOnlyFilterTests(TestCase):
         with mock.patch.object(lumen, 'read_mhd', side_effect=lambda path: path), \
                 mock.patch.object(lumen, 'detect',
                                   side_effect=lambda img, roi, mask, p: per_frame[int(img[3:-4])]), \
-                mock.patch.object(lumen.os.path, 'isfile', return_value=True):
+                mock.patch.object(lumen.os.path, 'isfile', return_value=True), \
+                mock.patch.object(lumen.Runner, '_check_size'):
             r = lumen.Runner(frames, None, None, lumen.Params(levels=2, **params))
             return r.process(sorted(frames)), r
 

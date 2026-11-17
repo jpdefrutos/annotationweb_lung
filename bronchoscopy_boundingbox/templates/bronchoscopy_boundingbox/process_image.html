@@ -86,8 +86,8 @@ loadBBTask({{ image_sequence.id }});
     <div class="proposal-row prop-track">
         <label title="Min IoU to continue a level-1 track">track_iou <input type="number" id="propTrackIou" value="0.45" step="0.05" min="0" max="1" style="width: 4.5em;"></label>
         <label class="prop-level2" title="Min IoU to continue a level-2 track">track_iou2 <input type="number" id="propTrackIou2" value="0.3" step="0.05" min="0" max="1" style="width: 4.5em;"></label>
-        <label title="Frames a track survives without a match">max_lost <input type="number" id="propMaxLost" value="1" step="1" min="0" max="100" style="width: 3.5em;"></label>
-        <label title="Main boxes whose track is in fewer frames than this are left out as noise (1 = keep all). Nested boxes are not filtered.">min_track_len (main) <input type="number" id="propMinTrackLen" value="2" step="1" min="1" max="10" style="width: 3.5em;"></label>
+        <label title="Frames a track survives without a match">max_lost <input type="number" id="propMaxLost" value="1" step="1" min="0" max="10" style="width: 3.5em;"></label>
+        <label title="Main boxes whose track is in fewer frames than this are left out as noise (1 = keep all). Nested boxes are not filtered.">min_track_len (main) <input type="number" id="propMinTrackLen" value="2" step="1" min="1" max="5" style="width: 3.5em;"></label>
     </div>
     <div class="proposal-row">
         <button type="button" id="proposeButton" title="Suggest boxes for the next N frames, starting at the current frame">Suggest from current frame</button>
@@ -97,6 +97,7 @@ loadBBTask({{ image_sequence.id }});
         <button type="button" id="acceptFrameProposalsButton" title="Accept every suggestion on this frame with its current name">Accept all in frame</button>
         <button type="button" id="clearProposalsButton">Clear suggestions</button>
     </div>
+    <div style="font-size: 0.85em; margin-top: 4px; opacity: 0.8;">Shift+drag draws a new box on top of suggestions and boxes.</div>
     <div id="proposalStatus" style="font-size: 0.9em; margin-top: 4px;"></div>
     </div>
 
