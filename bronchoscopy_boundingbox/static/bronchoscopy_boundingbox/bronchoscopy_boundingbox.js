@@ -364,8 +364,10 @@ function rebuildLabelDropdown() {
 }
 
 // Renames the label currently selected in the dropdown on every box that has it,
-// across every frame of the current video. If a frame already has a box with the
-// target name, that frame's box is left under the old name to avoid a duplicate.
+// across every frame of the current video - or, with "Only from the current
+// frame onward" ticked, only on the current and later frames. If a frame already
+// has a box with the target name, that frame's box is left under the old name to
+// avoid a duplicate.
 function renameSelectedLabel() {
     var select = document.getElementById('usedLabelsSelect');
     if (!select) return;
@@ -375,13 +377,29 @@ function renameSelectedLabel() {
         return;
     }
 
-    var newLabel = prompt('Rename label "' + oldLabel + '" to:', oldLabel);
+    var fromFrame = $('#renameFromHere').is(':checked') ? g_currentFrameNr : null;
+    var inRange = function(fn) { return fromFrame === null || parseInt(fn, 10) >= fromFrame; };
+
+    var newLabel = prompt('Rename label "' + oldLabel + '" to' +
+        (fromFrame === null ? '' : ' (frame ' + fromFrame + ' onward)') + ':', oldLabel);
     if (newLabel === null) return; // Cancelled
     newLabel = newLabel.trim();
     if (!newLabel || newLabel === oldLabel) return;
 
+    var renameCount = 0;
+    for (var rf in g_boxes) {
+        if (!inRange(rf)) continue;
+        for (var ri = 0; ri < g_boxes[rf].length; ri++)
+            if (g_boxes[rf][ri].label === oldLabel) renameCount++;
+    }
+    if (renameCount === 0) {
+        alert('No box named "' + oldLabel + '" on frame ' + fromFrame + ' or later.');
+        return;
+    }
+
     var existingCount = 0;
     for (var fn in g_boxes) {
+        if (!inRange(fn)) continue;
         var boxesInFn = g_boxes[fn];
         for (var bi = 0; bi < boxesInFn.length; bi++) {
             if (boxesInFn[bi].label === newLabel) existingCount++;
@@ -389,7 +407,8 @@ function renameSelectedLabel() {
     }
     if (existingCount > 0) {
         var proceed = confirm(
-            '"' + newLabel + '" is already used on ' + existingCount + ' other box(es) in this video.\n\n' +
+            '"' + newLabel + '" is already used on ' + existingCount + ' other box(es) in ' +
+            (fromFrame === null ? 'this video' : 'frame ' + fromFrame + ' onward') + '.\n\n' +
             'Merging is permanent — you won\'t be able to tell old "' + newLabel + '" boxes apart ' +
             'from the renamed ones afterward.\n\n' +
             'Tip: if you also want the existing "' + newLabel + '" boxes to become something else, ' +
@@ -402,6 +421,7 @@ function renameSelectedLabel() {
     var newColor = stringToColor(newLabel);
     var skippedFrames = [];
     for (var frame_nr in g_boxes) {
+        if (!inRange(frame_nr)) continue;
         var boxesInFrame = g_boxes[frame_nr];
         var targetExists = false;
         for (var i = 0; i < boxesInFrame.length; i++) {
@@ -425,7 +445,8 @@ function renameSelectedLabel() {
     redrawSequence();
 
     if (skippedFrames.length > 0) {
-        alert('Renamed everywhere except frame(s) ' + skippedFrames.join(', ') +
+        alert('Renamed ' + (fromFrame === null ? 'everywhere' : 'from frame ' + fromFrame + ' onward') +
+            ' except frame(s) ' + skippedFrames.join(', ') +
             ', which already had a box labeled "' + newLabel + '". Those were left as "' + oldLabel + '".');
     }
 }
