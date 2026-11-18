@@ -205,6 +205,9 @@ function setupSegmentation() {
     $('#renameLabelButton').click(function() {
         renameSelectedLabel();
     });
+    $('#deleteLabelButton').click(function() {
+        deleteSelectedLabel();
+    });
 
     rebuildLabelDropdown();
     setupProposals();
@@ -302,7 +305,7 @@ function deleteAllBoxesInFrame() {
 function undoLastBoxAction() {
     var action = g_undoStack.pop();
     if (!action) return;
-    if (!(action.frame_nr in g_boxes))
+    if (action.type !== 'removeMany' && !(action.frame_nr in g_boxes))
         g_boxes[action.frame_nr] = [];
     if (action.type === 'add') {
         var idx = g_boxes[action.frame_nr].indexOf(action.box);
@@ -311,9 +314,18 @@ function undoLastBoxAction() {
     } else if (action.type === 'remove') {
         var insertAt = Math.min(action.index, g_boxes[action.frame_nr].length);
         g_boxes[action.frame_nr].splice(insertAt, 0, action.box);
+    } else if (action.type === 'removeMany') {
+        // Put back in reverse removal order so each index is valid again.
+        for (var r = action.removed.length - 1; r >= 0; r--) {
+            var item = action.removed[r];
+            if (!(item.frame_nr in g_boxes))
+                g_boxes[item.frame_nr] = [];
+            var at = Math.min(item.index, g_boxes[item.frame_nr].length);
+            g_boxes[item.frame_nr].splice(at, 0, item.box);
+        }
     }
     g_annotationHasChanged = true;
-    if (action.frame_nr === g_currentFrameNr)
+    if (action.type === 'removeMany' || action.frame_nr === g_currentFrameNr)
         redrawSequence();
     rebuildLabelDropdown();
 }
@@ -459,6 +471,51 @@ function renameSelectedLabel() {
             ' except frame(s) ' + skippedFrames.join(', ') +
             ', which already had a box labeled "' + newLabel + '". Those were left as "' + oldLabel + '".');
     }
+}
+
+// Deletes every box with the label selected in the dropdown, across the whole
+// video - or, with "Only from the current frame onward" ticked, only on the
+// current and later frames. One Ctrl+Z restores all of them.
+function deleteSelectedLabel() {
+    var select = document.getElementById('usedLabelsSelect');
+    if (!select) return;
+    var label = select.value;
+    if (!label) {
+        alert('Select an existing label to delete.');
+        return;
+    }
+    var fromFrame = $('#renameFromHere').is(':checked') ? g_currentFrameNr : null;
+    var where = fromFrame === null ? 'in this video' : 'on frame ' + fromFrame + ' or later';
+
+    var count = 0;
+    for (var cf in g_boxes) {
+        if (fromFrame !== null && parseInt(cf, 10) < fromFrame) continue;
+        for (var ci = 0; ci < g_boxes[cf].length; ci++)
+            if (g_boxes[cf][ci].label === label) count++;
+    }
+    if (count === 0) {
+        alert('No box named "' + label + '" ' + where + '.');
+        return;
+    }
+    if (!confirm('Delete ' + count + ' box(es) named "' + label + '" ' + where + '?\n\n' +
+                 'Ctrl+Z brings them all back.'))
+        return;
+
+    var removed = [];
+    for (var frame_nr in g_boxes) {
+        if (fromFrame !== null && parseInt(frame_nr, 10) < fromFrame) continue;
+        var boxes = g_boxes[frame_nr];
+        for (var i = 0; i < boxes.length; ) {
+            if (boxes[i].label === label)
+                removed.push({frame_nr: frame_nr, index: i, box: boxes.splice(i, 1)[0]});
+            else
+                i++;
+        }
+    }
+    g_undoStack.push({type: 'removeMany', removed: removed});
+    g_annotationHasChanged = true;
+    rebuildLabelDropdown();
+    redrawSequence();
 }
 
 function clamp(v, lo, hi) {
