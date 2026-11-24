@@ -514,7 +514,7 @@ function deleteSelectedLabel() {
     if (!select) return;
     var label = select.value;
     if (!label) {
-        alert('Select an existing label to delete.');
+        alert('Select the label of the boxes to delete.');
         return;
     }
     var frames = [];

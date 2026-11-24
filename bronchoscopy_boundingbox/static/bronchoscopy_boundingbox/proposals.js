@@ -56,7 +56,7 @@ function requestProposals(startFrame) {
     if (g_proposalBusy || g_imageSequenceID === null) return;
     var count = parseInt($('#propCount').val(), 10) || 60;
     g_proposalBusy = true;
-    $('#proposeButton, #proposeNextButton').prop('disabled', true);
+    $('#proposeButton').prop('disabled', true);
     setProposalStatus('Finding boxes in frames ' + startFrame + '–' + (startFrame + count - 1) +
         '… (first run on a video also estimates the scope area)');
 
@@ -97,15 +97,7 @@ function requestProposals(startFrame) {
     }).always(function() {
         g_proposalBusy = false;
         $('#proposeButton').prop('disabled', false);
-        $('#proposeNextButton').prop('disabled', !canContinueProposals());
     });
-}
-
-// g_sequenceLength is end - start with an inclusive end (annotationweb.js), so
-// the last loaded frame is g_startFrame + g_sequenceLength.
-function canContinueProposals() {
-    return g_proposalState !== null && g_proposalState.prev !== null &&
-        g_proposalState.prev + 1 <= g_startFrame + g_sequenceLength;
 }
 
 // Names already given to tracks, from frames before firstFrame: the name on
@@ -470,26 +462,6 @@ function proposalUnderCursor(x, y, inside) {
     return p.width * p.height < box.width * box.height ? p : null;
 }
 
-function acceptAllProposalsInFrame() {
-    var list = (g_proposals[g_currentFrameNr] || []).slice();
-    if (list.length === 0) return;
-    var unnamed = list.filter(function(p) { return p.label === p.placeholder; }).length;
-    if (unnamed > 0 && !confirm(unnamed + ' of ' + list.length +
-            ' suggestion(s) on this frame still have temporary names. Accept all anyway?'))
-        return;
-    var skipped = [];
-    // Parents first, so they are named before children that look them up.
-    list.sort(function(a, b) { return a.level - b.level; });
-    for (var i = 0; i < list.length; i++) {
-        if (!acceptProposalAs(list[i], list[i].label))
-            skipped.push(list[i].label);
-    }
-    rebuildLabelDropdown();
-    redrawSequence();
-    if (skipped.length > 0)
-        alert('Not accepted (name already used on this frame, or box too small): ' + skipped.join(', '));
-}
-
 function clearProposals() {
     var n = 0;
     for (var f in g_proposals) n += g_proposals[f].length;
@@ -497,7 +469,6 @@ function clearProposals() {
     if (!confirm('Remove all ' + n + ' unaccepted suggestion(s)? Accepted boxes are kept.')) return;
     g_proposals = {};
     g_proposalState = null;     // the next run starts fresh
-    $('#proposeNextButton').prop('disabled', true);
     selectProposal(null);
     setProposalStatus('');
 }
@@ -534,28 +505,23 @@ function setupProposals() {
     $('#propLevels, #propTrack').change(updateProposalSettingsVisibility);
 
     $('#proposeButton').click(function() { requestProposals(g_currentFrameNr); });
-    $('#proposeNextButton').click(function() {
-        if (canContinueProposals()) requestProposals(g_proposalState.prev + 1);
-    });
-    $('#acceptFrameProposalsButton').click(acceptAllProposalsInFrame);
     $('#clearProposalsButton').click(clearProposals);
 
-    $('#acceptProposalButton').click(acceptSelectedProposal);
-    $('#rejectProposalButton').click(function() {
-        if (g_selectedProposal) { removeProposal(g_selectedProposal); redrawSequence(); }
-    });
     $('#renameTrackButton').click(renameSelectedTrack);
     $('#acceptTrackButton').click(acceptSelectedTrack);
     $('#rejectTrackButton').click(rejectSelectedTrack);
 
-    // Ctrl+Enter accepts the selected suggestion, also from the name field;
-    // plain Enter in the name field does the same.
+    // Ctrl+Enter accepts the selected suggestion (also from the name field);
+    // plain Enter in the name field accepts the whole track (Accept track).
     $(document).keydown(function(e) {
         if (!g_selectedProposal) return;
         var inName = e.target.id === 'proposalName';
-        if (e.which === 13 && (e.ctrlKey || inName)) {
+        if (e.which === 13 && e.ctrlKey) {
             e.preventDefault();
             acceptSelectedProposal();
+        } else if (e.which === 13 && inName) {
+            e.preventDefault();
+            acceptSelectedTrack();
         } else if (e.which === 27 && inName) {
             selectProposal(null);
         }

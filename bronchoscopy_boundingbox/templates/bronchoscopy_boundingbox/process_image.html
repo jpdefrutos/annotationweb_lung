@@ -13,7 +13,7 @@
     <button type="button" id="renameLabelButton" style="margin-top: 4px;"
             title="Rename this label on every box in the current video">Rename label</button>
     <button type="button" id="deleteLabelButton" style="margin-top: 4px;"
-            title="Delete every box with this label in the current video">Delete label</button>
+            title="Delete every box with this label in the current video">Delete boxes</button>
     <label style="display: block; margin-top: 4px; font-size: 0.9em;"
            title="Only the current section: from this frame until the first frame without the label">
         <input type="checkbox" id="renameFromHere"> Only from the current frame onward</label>
@@ -93,10 +93,6 @@ loadBBTask({{ image_sequence.id }});
     </div>
     <div class="proposal-row">
         <button type="button" id="proposeButton" title="Suggest boxes for the next N frames, starting at the current frame">Suggest from current frame</button>
-        <button type="button" id="proposeNextButton" disabled title="Continue the tracks with the next N frames">Next chunk</button>
-    </div>
-    <div class="proposal-row">
-        <button type="button" id="acceptFrameProposalsButton" title="Accept every suggestion on this frame with its current name">Accept all in frame</button>
         <button type="button" id="clearProposalsButton">Clear suggestions</button>
     </div>
     <div style="font-size: 0.85em; margin-top: 4px; opacity: 0.8;">Shift+drag draws a new box on top of suggestions and boxes.</div>
@@ -109,12 +105,8 @@ loadBBTask({{ image_sequence.id }});
         <input type="text" id="proposalName" style="width: 100%; margin-top: 2px; padding: 4px 6px; box-sizing: border-box;">
         <label style="font-size: 0.9em;"><input type="checkbox" id="proposalFromHere" checked> Track actions only from this frame onward</label>
         <div class="proposal-row">
-            <button type="button" id="acceptProposalButton" title="Ctrl+Enter">Accept</button>
-            <button type="button" id="rejectProposalButton" title="Double-click or Ctrl+D on the suggestion">Reject</button>
-        </div>
-        <div class="proposal-row">
             <button type="button" id="renameTrackButton" title="Give every suggestion in this track the name above">Rename track</button>
-            <button type="button" id="acceptTrackButton" title="Accept every suggestion in this track with the name above">Accept track</button>
+            <button type="button" id="acceptTrackButton" title="Accept every suggestion in this track with the name above (Enter in Name)">Accept track</button>
             <button type="button" id="rejectTrackButton">Reject track</button>
         </div>
     </div>
