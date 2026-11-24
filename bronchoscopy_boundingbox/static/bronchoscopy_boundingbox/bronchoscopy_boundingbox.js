@@ -305,6 +305,14 @@ function deleteAllBoxesInFrame() {
 function undoLastBoxAction() {
     var action = g_undoStack.pop();
     if (!action) return;
+    if (action.type === 'custom') {
+        // Multi-step actions from other scripts (e.g. Accept track) undo themselves.
+        action.undo();
+        g_annotationHasChanged = true;
+        redrawSequence();
+        rebuildLabelDropdown();
+        return;
+    }
     if (action.type !== 'removeMany' && !(action.frame_nr in g_boxes))
         g_boxes[action.frame_nr] = [];
     if (action.type === 'add') {

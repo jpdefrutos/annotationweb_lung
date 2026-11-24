@@ -358,15 +358,17 @@ function removeProposal(p) {
     if (g_selectedProposal === p) selectProposal(null);
 }
 
-// Turns a suggestion into an ordinary box with the given name. Returns false if
-// the frame already has a box with that name (or the box is too small).
-function acceptProposalAs(p, name) {
-    var box = addBox(p.frame_nr, p.x, p.y, p.x + p.width, p.y + p.height, name, undefined, true, false);
-    if (!box) return false;
+// Turns a suggestion into an ordinary box with the given name and returns it,
+// or null if the frame already has a box with that name (or the box is too
+// small). recordUndo=false when the caller pushes its own undo step.
+function acceptProposalAs(p, name, recordUndo) {
+    if (recordUndo === undefined) recordUndo = true;
+    var box = addBox(p.frame_nr, p.x, p.y, p.x + p.width, p.y + p.height, name, undefined, recordUndo, false);
+    if (!box) return null;
     box.src = { run_id: p.run_id, box_id: p.box_id };   // in memory only; for parentName()
     removeProposal(p);
     g_annotationHasChanged = true;
-    return true;
+    return box;
 }
 
 function confirmPlaceholder(name, p) {
@@ -406,11 +408,19 @@ function renameSelectedTrack() {
     if (!name) { alert('Enter a name first.'); return; }
     var list = trackProposals(p, trackScopeFrame());
     if (list.length === 0) return;
-    if (list.length > 1 && !confirm('Rename ' + describeRange(list) + ' to "' + name + '"?')) return;
+    var oldLabels = list.map(function(q) { return q.label; });
     for (var i = 0; i < list.length; i++)
         list[i].label = name;
+    g_undoStack.push({type: 'custom', undo: function() {
+        for (var j = 0; j < list.length; j++)
+            list[j].label = oldLabels[j];
+        refreshChildNames();
+        if (g_selectedProposal) selectProposal(g_selectedProposal);
+        showProposalNotice('Undid Rename track.');
+    }});
     refreshChildNames();
     selectProposal(p);
+    showProposalNotice('Renamed ' + describeRange(list) + ' to "' + name + '". Ctrl+Z undoes.');
 }
 
 function acceptSelectedTrack() {
@@ -421,28 +431,71 @@ function acceptSelectedTrack() {
     if (!confirmPlaceholder(name, p)) return;
     var list = trackProposals(p, trackScopeFrame());
     if (list.length === 0) return;
-    if (list.length > 1 && !confirm('Accept ' + describeRange(list) + ' as "' + name + '"?')) return;
-    var skipped = [];
+    // No confirmation: the result is shown in the notice line, and one Ctrl+Z
+    // takes the whole track back to suggestions.
+    var skipped = [], accepted = [];
     for (var i = 0; i < list.length; i++) {
-        if (!acceptProposalAs(list[i], name))
+        var box = acceptProposalAs(list[i], name, false);
+        if (box)
+            accepted.push({proposal: list[i], box: box});
+        else
             skipped.push(list[i].frame_nr);
     }
+    if (accepted.length > 0)
+        g_undoStack.push({type: 'custom', undo: function() { unacceptTrack(accepted); }});
     refreshChildNames();
     rebuildLabelDropdown();
     redrawSequence();
-    if (skipped.length > 0)
-        alert('Not accepted on frame(s) ' + skipped.join(', ') + ': a box named "' + name +
-            '" already exists there (or the box is too small). Those suggestions are kept.');
+    showProposalNotice('Accepted ' + accepted.length + ' box(es) as "' + name + '"' +
+        (accepted.length ? ' in frames ' + accepted[0].proposal.frame_nr + '–' +
+            accepted[accepted.length - 1].proposal.frame_nr : '') + '. Ctrl+Z undoes.' +
+        (skipped.length ? ' Not accepted on frame(s) ' + skipped.join(', ') + ': "' + name +
+            '" already exists there (or the box is too small); those suggestions are kept.' : ''),
+        skipped.length > 0);
+}
+
+// Undo for Accept track: removes the accepted boxes and turns them back into
+// suggestions.
+function unacceptTrack(accepted) {
+    for (var i = 0; i < accepted.length; i++) {
+        var a = accepted[i], f = a.proposal.frame_nr;
+        var boxes = g_boxes[f] || [];
+        var k = boxes.indexOf(a.box);
+        if (k !== -1) boxes.splice(k, 1);
+        (g_proposals[f] = g_proposals[f] || []).push(a.proposal);
+    }
+    refreshChildNames();
+    showProposalNotice('Undid Accept track: ' + accepted.length + ' box(es) are suggestions again.');
+}
+
+// Shows a short message under the track buttons that fades out by itself, so
+// the annotator does not have to click anything away.
+var g_proposalNoticeTimer = null;
+function showProposalNotice(text, important) {
+    var el = $('#proposalNotice');
+    clearTimeout(g_proposalNoticeTimer);
+    el.stop(true, true).text(text).css('color', important ? '#ffb040' : '').show();
+    g_proposalNoticeTimer = setTimeout(function() { el.fadeOut(600); },
+                                       important ? 10000 : 4000);
 }
 
 function rejectSelectedTrack() {
     var p = g_selectedProposal;
     if (!p) return;
     var list = trackProposals(p, trackScopeFrame());
-    if (list.length > 1 && !confirm('Reject ' + describeRange(list) + '?')) return;
+    if (list.length === 0) return;
     for (var i = 0; i < list.length; i++)
         removeProposal(list[i]);
+    g_undoStack.push({type: 'custom', undo: function() {
+        for (var j = 0; j < list.length; j++) {
+            var f = list[j].frame_nr;
+            (g_proposals[f] = g_proposals[f] || []).push(list[j]);
+        }
+        refreshChildNames();
+        showProposalNotice('Undid Reject track: ' + list.length + ' suggestion(s) are back.');
+    }});
     redrawSequence();
+    showProposalNotice('Rejected ' + describeRange(list) + '. Ctrl+Z undoes.');
 }
 
 function rejectProposal(p) {
