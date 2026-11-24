@@ -371,12 +371,7 @@ function selectProposal(p) {
         redrawSequence();
         return;
     }
-    var track = trackProposals(p);
-    var info = 'Suggestion <b>' + escapeHtml(p.label) + '</b>, level ' + p.level;
-    if (track.length > 1)
-        info += ', track in frames ' + track[0].frame_nr + '–' + track[track.length - 1].frame_nr +
-            ' (' + track.length + ' boxes)';
-    $('#selectedProposalInfo').html(info);
+    showSelectedProposalInfo();
 
     // Pre-fill the current name. For a suggested name, only its last part (the
     // letter) is selected, so typing "1" turns "1,2,1,a" into "1,2,1,1".
@@ -450,6 +445,34 @@ function acceptSelectedProposal() {
     refreshChildNames();
     rebuildLabelDropdown();
     redrawSequence();
+}
+
+// Info for the selected suggestion: its whole track, and exactly which boxes
+// the track buttons (Accept track / Enter) will take, so the annotator sees
+// how long the track is before accepting it.
+function showSelectedProposalInfo() {
+    var p = g_selectedProposal;
+    if (!p) return;
+    var track = trackProposals(p);
+    var scope = trackProposals(p, trackScopeFrame());
+    var span = function(list) {
+        return list[0].frame_nr === list[list.length - 1].frame_nr ? 'frame ' + list[0].frame_nr :
+            'frames ' + list[0].frame_nr + '–' + list[list.length - 1].frame_nr;
+    };
+    var info = 'Suggestion <b>' + escapeHtml(p.label) + '</b>, ' +
+        (p.level === 1 ? 'main box' : 'nested box') + '. Track: ' + track.length +
+        ' frame' + (track.length === 1 ? '' : 's') + ' (' + span(track) + ').';
+    if (scope.length && scope.length !== track.length)
+        info += '<br>Accept track takes <b>' + scope.length + ' box' + (scope.length === 1 ? '' : 'es') +
+            '</b> (' + span(scope) + ').';
+    else if (scope.length === 1)
+        info += '<br>Accept track takes only this box.';
+    else if (scope.length)
+        info += '<br>Accept track takes <b>all ' + scope.length + '</b>.';
+    var gaps = track.length > 1 ? track[track.length - 1].frame_nr - track[0].frame_nr + 1 - track.length : 0;
+    if (gaps > 0)
+        info += ' Missing on ' + gaps + ' frame' + (gaps === 1 ? '' : 's') + ' in between.';
+    $('#selectedProposalInfo').html(info);
 }
 
 function trackScopeFrame() {
@@ -659,6 +682,7 @@ function setupProposals() {
     updateProposalSettingsVisibility();
     setSelectedProposalControlsEnabled(false);
     $('#propLevels, #propTrack').change(updateProposalSettingsVisibility);
+    $('#proposalFromHere').change(showSelectedProposalInfo);
 
     $('#proposeButton').click(function() { requestProposals(g_currentFrameNr); });
     $('#clearProposalsButton').click(clearProposals);
