@@ -68,6 +68,9 @@ class Params:
     min_track_len: int = 2      # with tracking: drop main boxes whose track is in fewer frames
     handoff: bool = True        # a nested box that becomes a main box keeps its track
     handoff_cover: float = 0.5  # ... if at least this much of it lies inside the new main box
+    track_cover: float = 0.6    # main boxes: continue a track IoU missed if this much of the
+                                # smaller box lies inside the other (0 = off) ...
+    track_max_ratio: float = 3.0  # ... and the areas differ at most this factor
 
     @property
     def iou2(self):
@@ -86,6 +89,7 @@ PARAM_LIMITS = {
     "track_iou": (float, 0.0, 1.0),
     "track_iou2": (float, 0.0, 1.0),
     "handoff": (bool, None, None),
+    "track_cover": (float, 0.0, 1.0),
     # max_lost and min_track_len together set the look-ahead past each chunk,
     # (min_track_len - 1) * (max_lost + 1) frames: at most 44 with these limits.
     "max_lost": (int, 0, 10),
@@ -408,6 +412,27 @@ def match(a, b, thr):
     return [(i, j, m[i, j]) for i, j in zip(r, c) if m[i, j] >= thr]
 
 
+def match_cover(a, b, thr, max_ratio):
+    """
+    Hungarian matching on how much of the smaller box lies inside the other,
+    for pairs whose areas differ at most max_ratio. Returns [(i, j, cover)].
+    """
+    if not a or not b:
+        return []
+    m = np.zeros((len(a), len(b)))
+    for i, (ax, ay, aw, ah) in enumerate(a):
+        for j, (bx, by, bw, bh) in enumerate(b):
+            small, big = sorted((aw * ah, bw * bh))
+            if small <= 0 or big > max_ratio * small:
+                continue
+            iw = min(ax + aw, bx + bw) - max(ax, bx)
+            ih = min(ay + ah, by + bh) - max(ay, by)
+            if iw > 0 and ih > 0:
+                m[i, j] = iw * ih / small
+    r, c = linear_sum_assignment(-m)
+    return [(i, j, m[i, j]) for i, j in zip(r, c) if m[i, j] >= thr]
+
+
 class _IdCounter:
     """Shared ID source for both trackers; its value is part of the run state."""
 
@@ -425,10 +450,13 @@ class IoUTracker:
     The BronchoTop tracker: match new boxes to each track's last box by IoU
     (Hungarian, threshold iou_thr). Unmatched boxes start new tracks; a track
     unmatched for more than max_lost frames is removed. No motion model.
+    Additions here: an optional hand-over of tracks from elsewhere (adopt) and,
+    with cover_thr > 0, a second matching pass for boxes that changed size.
     """
 
-    def __init__(self, iou_thr, max_lost, new_id, tracks=None):
+    def __init__(self, iou_thr, max_lost, new_id, tracks=None, cover_thr=0.0, max_ratio=3.0):
         self.iou_thr, self.max_lost, self.new_id = iou_thr, max_lost, new_id
+        self.cover_thr, self.max_ratio = cover_thr, max_ratio
         # id -> {"box": last box, "lost": frames unmatched, "n": frames seen}
         self.tracks = tracks if tracks is not None else {}
 
@@ -450,17 +478,30 @@ class IoUTracker:
             self.tracks[t] = dict(self.tracks[t], box=boxes[j], lost=0, n=self.tracks[t]["n"] + 1)
             out[j] = t
             matched.add(t)
-        for t in ids:
-            if t not in matched:
-                self.tracks[t]["lost"] += 1
-                if self.tracks[t]["lost"] > self.max_lost:
-                    del self.tracks[t]
         if adopt:
             for j, (t, entry) in adopt([j for j in range(len(boxes)) if out[j] is None],
                                        boxes).items():
                 self.tracks[t] = {"box": boxes[j], "lost": 0, "n": entry["n"] + 1,
                                   "adopted": 1}
                 out[j] = t
+        if self.cover_thr:
+            # Second chance for tracks IoU could not continue because the box
+            # grew, shrank or shifted a lot (scope moving): most of the smaller
+            # box lies inside the other, and the sizes differ at most max_ratio.
+            free_t = [t for t in ids if t not in matched]
+            free_j = [j for j in range(len(boxes)) if out[j] is None]
+            for i, k, _ in match_cover([self.tracks[t]["box"] for t in free_t],
+                                       [boxes[j] for j in free_j],
+                                       self.cover_thr, self.max_ratio):
+                t, j = free_t[i], free_j[k]
+                self.tracks[t] = dict(self.tracks[t], box=boxes[j], lost=0, n=self.tracks[t]["n"] + 1)
+                out[j] = t
+                matched.add(t)
+        for t in ids:
+            if t not in matched:
+                self.tracks[t]["lost"] += 1
+                if self.tracks[t]["lost"] > self.max_lost:
+                    del self.tracks[t]
         for j, b in enumerate(boxes):
             if out[j] is None:
                 out[j] = self.new_id()
@@ -521,7 +562,8 @@ class Runner:
             self.run_id, self.prev = new_run_id(), None
             self._ids = _IdCounter(1)
             t1, t2 = {}, {}
-        self.trackers = {1: IoUTracker(params.track_iou, params.max_lost, self._ids, t1),
+        self.trackers = {1: IoUTracker(params.track_iou, params.max_lost, self._ids, t1,
+                                       params.track_cover, params.track_max_ratio),
                          2: IoUTracker(params.iou2, params.max_lost, self._ids, t2)}
 
     @staticmethod

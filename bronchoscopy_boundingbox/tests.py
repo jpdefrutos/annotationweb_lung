@@ -365,3 +365,27 @@ class HandoffTests(TestCase):
         r = self._runner({7: (100, 100, 50, 50)})
         ids = r.trackers[1].update([(140, 100, 80, 80)], r._adopt_nested)  # 20% inside
         self.assertEqual(ids, [100])
+
+
+class CoverMatchTests(TestCase):
+    """Main-box tracks continue when the box grows/shrinks too much for IoU."""
+
+    def _tracker(self, cover):
+        t = lumen.IoUTracker(0.45, 1, lumen._IdCounter(), cover_thr=cover, max_ratio=3.0)
+        t.update([(100, 100, 400, 400)])
+        return t
+
+    def test_shrinking_box_keeps_track(self):
+        # IoU 0.39, but the new box (2.6x smaller) lies completely inside the old one
+        self.assertEqual(self._tracker(0.6).update([(150, 150, 250, 250)]), [1])
+
+    def test_off_gives_new_track(self):
+        self.assertEqual(self._tracker(0.0).update([(150, 150, 250, 250)]), [2])
+
+    def test_much_smaller_box_is_not_taken(self):
+        # inside, but 16x smaller: more likely a different opening
+        self.assertEqual(self._tracker(0.6).update([(200, 200, 100, 100)]), [2])
+
+    def test_params_defaults(self):
+        p = lumen.Params()
+        self.assertEqual((p.track_cover, p.track_max_ratio), (0.6, 3.0))
