@@ -98,10 +98,13 @@ function requestProposals(startFrame) {
             refreshChildNames();
             setProposalStatus('Undid the suggestions for frames ' + first + '–' + last + '.');
         }});
-        var n = data.rows.length - hidden;
+        var auto = continued ? autoAcceptContinuedTracks(first, last) : {boxes: 0, tracks: 0};
+        var n = data.rows.length - hidden - auto.boxes;
         setProposalStatus(n + ' suggestion' + (n === 1 ? '' : 's') + ' in frames ' +
             data.frames[0] + '–' + data.frames[1] +
             (continued ? ' (tracks continued)' : ' (new run ' + data.state.run_id + ')') + '.' +
+            (auto.boxes ? ' ' + auto.boxes + ' box(es) continuing ' + auto.tracks +
+                ' accepted track(s) were accepted automatically (Ctrl+Z undoes).' : '') +
             (data.dropped ? ' ' + data.dropped + ' box(es) on short tracks were left out.' : '') +
             (hidden ? ' ' + hidden + ' hidden because they overlap a box you already have.' : ''));
         if (startFrame !== g_currentFrameNr)
@@ -510,6 +513,45 @@ function acceptSelectedTrack() {
         (skipped.length ? ' Not accepted on frame(s) ' + skipped.join(', ') + ': "' + name +
             '" already exists there (or the box is too small); those suggestions are kept.' : ''),
         skipped.length > 0);
+}
+
+// When a run continues the previous one, a track the annotator accepted just
+// before this run (on the last max_lost + 1 frames before it) is accepted on
+// the new frames too, under the same name. One undo step turns them all back
+// into suggestions. Returns {boxes, tracks} accepted.
+function autoAcceptContinuedTracks(first, last) {
+    var lookback = (parseInt($('#propMaxLost').val(), 10) || 0) + 1;
+    var accepted = {};      // "run|box" -> name on the latest of those frames
+    for (var f = first - lookback; f < first; f++) {
+        var boxes = g_boxes[f] || [];
+        for (var i = 0; i < boxes.length; i++)
+            if (boxes[i].src)
+                accepted[boxes[i].src.run_id + '|' + boxes[i].src.box_id] = boxes[i].label;
+    }
+    if (Object.keys(accepted).length === 0) return {boxes: 0, tracks: 0};
+    var done = [], tracks = {};
+    for (var g = first; g <= last; g++) {
+        var list = (g_proposals[g] || []).slice();
+        list.sort(function(a, b) { return a.level - b.level; });   // parents first
+        for (var k = 0; k < list.length; k++) {
+            var key = list[k].run_id + '|' + list[k].box_id;
+            if (!(key in accepted)) continue;
+            var box = acceptProposalAs(list[k], accepted[key], false);
+            if (box) {
+                done.push({proposal: list[k], box: box});
+                tracks[key] = true;
+            }
+        }
+    }
+    if (done.length > 0) {
+        g_undoStack.push({type: 'custom', undo: function() {
+            unacceptTrack(done, 'Undid the automatic accept: ' + done.length +
+                ' box(es) are suggestions again.');
+        }});
+        refreshChildNames();
+        rebuildLabelDropdown();
+    }
+    return {boxes: done.length, tracks: Object.keys(tracks).length};
 }
 
 // Undo for Accept / Accept track: removes the accepted boxes and turns them
