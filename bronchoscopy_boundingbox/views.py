@@ -45,7 +45,8 @@ def process_image(request, task_id, image_id):
         context = setup_task_context(request, task_id, Task.BRONCHOSCOPY_BOUNDING_BOX, image_id)
         context['javascript_files'] = ['bronchoscopy_boundingbox/bronchoscopy_boundingbox.js',
                                        'bronchoscopy_boundingbox/proposals.js']
-        context['static_version'] = _static_version(context['javascript_files'])
+        context['static_version'] = _static_version(context['javascript_files'] +
+                                                    ['annotationweb/annotationweb.js'])
         context['boxes'] = BronchoscopyBoundingBox.objects.filter(image__in=context['frames'])
 
         frame_labels = {}

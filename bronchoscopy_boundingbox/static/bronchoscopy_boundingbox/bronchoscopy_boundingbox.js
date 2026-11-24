@@ -458,6 +458,9 @@ function renameSelectedLabel() {
     newLabel = newLabel.trim();
     if (!newLabel || newLabel === oldLabel) return;
 
+    // Renaming into a name that is already in use merges the two; no dialog
+    // (Ctrl+Z undoes), but the notice below says so in orange.
+    var merged = getUsedLabels().indexOf(newLabel) !== -1;
     var newColor = stringToColor(newLabel);
     var skippedFrames = [];
     var renamed = [];
@@ -496,8 +499,10 @@ function renameSelectedLabel() {
     showNotice('#labelNotice', 'Renamed ' + renamed.length + ' box(es) "' + oldLabel + '" → "' +
         newLabel + '" on ' + range.text + '.' + (renamed.length ? ' Ctrl+Z undoes.' : '') +
         (skippedFrames.length ? ' Not on frame(s) ' + skippedFrames.join(', ') +
-            ': they already have a "' + newLabel + '" box, so those stay "' + oldLabel + '".' : ''),
-        skippedFrames.length > 0);
+            ': they already have a "' + newLabel + '" box, so those stay "' + oldLabel + '".' : '') +
+        (merged && renamed.length ? ' Note: "' + newLabel + '" was already used on other boxes;' +
+            ' they now share the name.' : ''),
+        skippedFrames.length > 0 || (merged && renamed.length > 0));
 }
 
 // Fills the Rename label / Delete boxes frame range for a label: from `frame` (or the label's

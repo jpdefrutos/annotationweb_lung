@@ -77,7 +77,10 @@ function requestProposals(startFrame) {
             setProposalStatus(data.message || 'Suggestion failed', true);
             return;
         }
-        var continued = g_proposalState && data.state.run_id === g_proposalState.run_id;
+        // The server keeps the run (and its IDs) but restarts all tracks
+        // unless this chunk starts right after the previous one.
+        var continued = !!g_proposalState && data.state.run_id === g_proposalState.run_id &&
+            g_proposalState.prev !== null && data.frames[0] === g_proposalState.prev + 1;
         var first = data.frames[0], last = data.frames[1];
         var prevState = g_proposalState, saved = {};
         for (var f = first; f <= last; f++)
@@ -102,7 +105,9 @@ function requestProposals(startFrame) {
         var n = data.rows.length - hidden - auto.boxes;
         setProposalStatus(n + ' suggestion' + (n === 1 ? '' : 's') + ' in frames ' +
             data.frames[0] + '–' + data.frames[1] +
-            (continued ? ' (tracks continued)' : ' (new run ' + data.state.run_id + ')') + '.' +
+            (continued ? ' (tracks continued)' :
+                ' (new tracks' + (prevState && data.state.run_id === prevState.run_id ?
+                    ': not right after the previous suggestions' : '') + ')') + '.' +
             (auto.boxes ? ' ' + auto.boxes + ' box(es) continuing ' + auto.tracks +
                 ' accepted track(s) were accepted automatically (Ctrl+Z undoes).' : '') +
             (data.dropped ? ' ' + data.dropped + ' box(es) on short tracks were left out.' : '') +
@@ -415,6 +420,9 @@ function removeProposal(p) {
 // small). recordUndo=false when the caller pushes its own undo step.
 function acceptProposalAs(p, name, recordUndo) {
     if (recordUndo === undefined) recordUndo = true;
+    // addBox() marks the frame as a key frame; remember if that is new, so an
+    // undo can take the mark away again (unacceptTrack)
+    p.addedKeyFrame = g_targetFrames.indexOf(p.frame_nr) === -1;
     var box = addBox(p.frame_nr, p.x, p.y, p.x + p.width, p.y + p.height, name, undefined, recordUndo, false);
     if (!box) return null;
     box.src = { run_id: p.run_id, box_id: p.box_id };   // in memory only; for parentName()
@@ -585,6 +593,8 @@ function unacceptTrack(accepted, notice) {
         var boxes = g_boxes[f] || [];
         var k = boxes.indexOf(a.box);
         if (k !== -1) boxes.splice(k, 1);
+        if (a.proposal.addedKeyFrame && boxes.length === 0)
+            removeKeyFrame(f);      // else saving would store an empty annotated frame
         (g_proposals[f] = g_proposals[f] || []).push(a.proposal);
     }
     refreshChildNames();

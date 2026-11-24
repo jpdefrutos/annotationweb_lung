@@ -689,7 +689,10 @@ class Runner:
             f += 1
             if f not in self.frames:
                 break                     # end of the video
-            ahead += self.frame(f)
+            try:
+                ahead += self.frame(f)
+            except LumenError:
+                break       # unreadable frame past the chunk: judge with what we have
         self._load(snapshot)
 
         # Frames a track spent as a nested box count too, for tracks handed

@@ -389,3 +389,26 @@ class CoverMatchTests(TestCase):
     def test_params_defaults(self):
         p = lumen.Params()
         self.assertEqual((p.track_cover, p.track_max_ratio), (0.6, 3.0))
+
+
+class BadFrameAfterChunkTests(SyntheticVideoTestCase):
+    """A missing frame just past the requested frames must not fail the request
+    (the look-ahead for min_track_len stops there instead)."""
+
+    def setUp(self):
+        super().setUp()
+        self._propose(0, 1)     # scope area estimated and cached while frame 5 exists
+        path = os.path.join(self.frame_dir, 'seq_5.mhd')
+        moved = path + '.away'
+        os.rename(path, moved)
+        self.addCleanup(os.rename, moved, path)
+
+    def test_lookahead_stops_at_missing_frame(self):
+        r = self._propose(0, 4)
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json()['frames'], [0, 3])
+
+    def test_missing_frame_inside_chunk_is_still_an_error(self):
+        r = self._propose(4, 3)
+        self.assertEqual(r.status_code, 400)
+        self.assertIn('Frame 5', r.json()['message'])
