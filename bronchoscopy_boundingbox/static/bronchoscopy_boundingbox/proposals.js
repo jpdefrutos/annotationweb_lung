@@ -78,8 +78,26 @@ function requestProposals(startFrame) {
             return;
         }
         var continued = g_proposalState && data.state.run_id === g_proposalState.run_id;
+        var first = data.frames[0], last = data.frames[1];
+        var prevState = g_proposalState, saved = {};
+        for (var f = first; f <= last; f++)
+            if (g_proposals[f]) saved[f] = g_proposals[f];
         g_proposalState = data.state;
-        var hidden = storeProposals(data.rows, data.frames[0], data.frames[1]);
+        var hidden = storeProposals(data.rows, first, last);
+        // Ctrl+Z puts back the suggestions these frames had before (if any)
+        // and the tracker state, so tracks continue as they did.
+        g_undoStack.push({type: 'custom', undo: function() {
+            if (g_selectedProposal && g_selectedProposal.frame_nr >= first &&
+                    g_selectedProposal.frame_nr <= last)
+                selectProposal(null);
+            for (var u = first; u <= last; u++) {
+                if (saved[u]) g_proposals[u] = saved[u];
+                else delete g_proposals[u];
+            }
+            g_proposalState = prevState;
+            refreshChildNames();
+            setProposalStatus('Undid the suggestions for frames ' + first + '–' + last + '.');
+        }});
         var n = data.rows.length - hidden;
         setProposalStatus(n + ' suggestion' + (n === 1 ? '' : 's') + ' in frames ' +
             data.frames[0] + '–' + data.frames[1] +
@@ -382,10 +400,14 @@ function acceptSelectedProposal() {
     var name = selectedName();
     if (!name) { alert('Enter a name first.'); return; }
     if (!confirmPlaceholder(name, p)) return;
-    if (!acceptProposalAs(p, name)) {
+    var box = acceptProposalAs(p, name, false);
+    if (!box) {
         alert('This frame already has a box named "' + name + '" (or the box is too small).');
         return;
     }
+    g_undoStack.push({type: 'custom', undo: function() {
+        unacceptTrack([{proposal: p, box: box}], 'Undid Accept: the box is a suggestion again.');
+    }});
     refreshChildNames();
     rebuildLabelDropdown();
     redrawSequence();
@@ -454,9 +476,9 @@ function acceptSelectedTrack() {
         skipped.length > 0);
 }
 
-// Undo for Accept track: removes the accepted boxes and turns them back into
-// suggestions.
-function unacceptTrack(accepted) {
+// Undo for Accept / Accept track: removes the accepted boxes and turns them
+// back into suggestions.
+function unacceptTrack(accepted, notice) {
     for (var i = 0; i < accepted.length; i++) {
         var a = accepted[i], f = a.proposal.frame_nr;
         var boxes = g_boxes[f] || [];
@@ -465,18 +487,11 @@ function unacceptTrack(accepted) {
         (g_proposals[f] = g_proposals[f] || []).push(a.proposal);
     }
     refreshChildNames();
-    showProposalNotice('Undid Accept track: ' + accepted.length + ' box(es) are suggestions again.');
+    showProposalNotice(notice || ('Undid Accept track: ' + accepted.length + ' box(es) are suggestions again.'));
 }
 
-// Shows a short message under the track buttons that fades out by itself, so
-// the annotator does not have to click anything away.
-var g_proposalNoticeTimer = null;
 function showProposalNotice(text, important) {
-    var el = $('#proposalNotice');
-    clearTimeout(g_proposalNoticeTimer);
-    el.stop(true, true).text(text).css('color', important ? '#ffb040' : '').show();
-    g_proposalNoticeTimer = setTimeout(function() { el.fadeOut(600); },
-                                       important ? 10000 : 4000);
+    showNotice('#proposalNotice', text, important);
 }
 
 function rejectSelectedTrack() {
@@ -500,6 +515,10 @@ function rejectSelectedTrack() {
 
 function rejectProposal(p) {
     removeProposal(p);
+    g_undoStack.push({type: 'custom', undo: function() {
+        (g_proposals[p.frame_nr] = g_proposals[p.frame_nr] || []).push(p);
+        refreshChildNames();
+    }});
     redrawSequence();
 }
 
@@ -519,11 +538,17 @@ function clearProposals() {
     var n = 0;
     for (var f in g_proposals) n += g_proposals[f].length;
     if (n === 0) return;
-    if (!confirm('Remove all ' + n + ' unaccepted suggestion(s)? Accepted boxes are kept.')) return;
+    var saved = g_proposals, savedState = g_proposalState;
     g_proposals = {};
     g_proposalState = null;     // the next run starts fresh
     selectProposal(null);
-    setProposalStatus('');
+    g_undoStack.push({type: 'custom', undo: function() {
+        g_proposals = saved;
+        g_proposalState = savedState;
+        refreshChildNames();
+        setProposalStatus('Undid Clear suggestions: ' + n + ' suggestion(s) are back.');
+    }});
+    setProposalStatus('Removed ' + n + ' unaccepted suggestion(s); accepted boxes are kept. Ctrl+Z undoes.');
 }
 
 // ── drawing ──────────────────────────────────────────────────────────────────

@@ -2,7 +2,7 @@
 
 {% block label_buttons %}
 <div style="margin-bottom: 8px;">
-    <label for="boxLabel"><strong>Box label:</strong></label>
+    <label for="boxLabel"><strong>Label for new boxes:</strong></label>
     <input type="text" id="boxLabel" placeholder="Enter label"
            style="width: 100%; margin-top: 4px; padding: 4px 6px; box-sizing: border-box;">
 </div>
@@ -10,13 +10,17 @@
     <label for="usedLabelsSelect"><strong>Used labels:</strong></label>
     <select id="usedLabelsSelect" style="width: 100%; margin-top: 4px; padding: 4px 6px; box-sizing: border-box;">
     </select>
+    <div style="margin-top: 6px; font-size: 0.9em;"
+         title="Click a box in the image to fill in its name and its section from the current frame">
+        From frame <input type="number" id="labelFromFrame" min="0" step="1" style="width: 5em;">
+        to <input type="number" id="labelToFrame" min="0" step="1" style="width: 5em;">
+        <button type="button" id="wholeVideoRangeButton" title="Set the range to every frame of the video">Select all frames</button>
+    </div>
     <button type="button" id="renameLabelButton" style="margin-top: 4px;"
-            title="Rename this label on every box in the current video">Rename label</button>
+            title="Rename the boxes with this label in the frame range above">Rename label</button>
     <button type="button" id="deleteLabelButton" style="margin-top: 4px;"
-            title="Delete every box with this label in the current video">Delete boxes</button>
-    <label style="display: block; margin-top: 4px; font-size: 0.9em;"
-           title="Only the current section: from this frame until the first frame without the label">
-        <input type="checkbox" id="renameFromHere"> Only from the current frame onward</label>
+            title="Delete the boxes with this label in the frame range above">Delete boxes</button>
+    <div id="labelNotice" style="font-size: 0.85em; margin-top: 4px; min-height: 1.2em;"></div>
 </div>
 {% endblock label_buttons %}
 

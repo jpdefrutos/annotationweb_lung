@@ -15,7 +15,8 @@ var g_currentBox = g_invalidBoxNr;
 var g_cornerSize = 20;
 var g_hoverX = null;
 var g_hoverY = null;
-var g_undoStack = []; // {type: 'add'|'remove', frame_nr, box, index}
+var g_undoStack = []; // {type: 'add'|'remove', frame_nr, box, index}, {type: 'removeMany', removed}, {type: 'custom', undo}
+var g_dragStart = null; // box geometry when a move/resize started, for undo
 var g_hydrationBoxes = []; // Saved boxes from the server, applied once real canvas size is known
 var g_boxClipboard = []; // Boxes saved via copyAllBoxes(), for pasting onto a non-adjacent frame
 
@@ -57,6 +58,7 @@ function finishDrag() {
     if (g_move || g_resize) {
         g_move = false;
         g_resize = false;
+        recordDragUndo();
         return;
     }
     if (g_paint) {
@@ -86,6 +88,10 @@ function setupSegmentation() {
         }
         if (inside.isInside) {
             g_currentBox = inside.boxNr;
+            var dragged = g_boxes[g_currentFrameNr][inside.boxNr];
+            showBoxLabel(dragged);
+            g_dragStart = {box: dragged, x: dragged.x, y: dragged.y,
+                           width: dragged.width, height: dragged.height};
             if (inside.isInsideCorner)
                 g_resize = true;
             else
@@ -189,13 +195,14 @@ function setupSegmentation() {
         rebuildLabelDropdown();
     });
 
-    // Selecting an existing label loads it into the Box label field so it can be
+    // Selecting an existing label loads it into the "Label for new boxes" field so it can be
     // tweaked (e.g. picking "1,2,1,1" to then edit into "1,2,1,2") rather than
     // retyped from scratch. Select the text so retyping the differing part is a
     // single keystroke away.
     $('#usedLabelsSelect').change(function() {
         var val = $(this).val();
         if (!val) return;
+        setDeleteRange(val, g_currentFrameNr);
         var boxLabelInput = document.getElementById('boxLabel');
         boxLabelInput.value = val;
         boxLabelInput.focus();
@@ -205,6 +212,7 @@ function setupSegmentation() {
     $('#renameLabelButton').click(function() {
         renameSelectedLabel();
     });
+    $('#wholeVideoRangeButton').click(setWholeVideoRange);
     $('#deleteLabelButton').click(function() {
         deleteSelectedLabel();
     });
@@ -368,7 +376,7 @@ function getUsedLabels() {
     return Object.keys(seen).sort(compareLabels);
 }
 
-// The "Used labels" dropdown is just a shortcut to fill in the Box label field
+// The "Used labels" dropdown is just a shortcut to fill in the "Label for new boxes" field
 // (see the change handler above) - it doesn't gate what can be drawn. The Box
 // label field always accepts free text, and drawing a box with a label that
 // hasn't been used before on this video simply creates it, picking up a color
@@ -409,151 +417,153 @@ function labelSectionFrom(label, start) {
     return frames;
 }
 
-function framesText(frames) {
-    return frames.length === 1 ? 'frame ' + frames[0] :
-        'frames ' + frames[0] + '-' + frames[frames.length - 1];
+// The From/To frame range shared by Rename label and Delete boxes, or null
+// (after telling the user) if it is not filled in correctly.
+function labelFrameRange() {
+    var from = parseInt($('#labelFromFrame').val(), 10);
+    var to = parseInt($('#labelToFrame').val(), 10);
+    if (isNaN(from) || isNaN(to) || to < from) {
+        alert('Enter the frame range: From frame must be a number and To frame the same or later. ' +
+              'Clicking a box fills it in.');
+        return null;
+    }
+    return {from: from, to: to, text: from === to ? 'frame ' + from : 'frames ' + from + '–' + to};
 }
 
-// Renames the label currently selected in the dropdown on every box that has it,
-// across every frame of the current video - or, with "Only from the current
-// frame onward" ticked, only in the current section: the consecutive frames from
-// the current one until the first frame without the label (see
-// labelSectionFrom), so a later section with the same name keeps it. If a frame already
-// has a box with the target name, that frame's box is left under the old name to
-// avoid a duplicate.
+// Renames the label selected in Used labels on the frames in the From/To range
+// (both included). A frame that already has a box with the new name keeps its
+// old-named box, to avoid two boxes with the same name. One Ctrl+Z undoes.
 function renameSelectedLabel() {
     var select = document.getElementById('usedLabelsSelect');
     if (!select) return;
     var oldLabel = select.value;
     if (!oldLabel) {
-        alert('Select an existing label to rename.');
+        alert('Select the label to rename, or click one of its boxes.');
+        return;
+    }
+    var range = labelFrameRange();
+    if (!range) return;
+    var inRange = function(fn) { var n = parseInt(fn, 10); return n >= range.from && n <= range.to; };
+
+    var count = 0;
+    for (var cf in g_boxes)
+        if (inRange(cf) && frameHasLabel(cf, oldLabel)) count++;
+    if (count === 0) {
+        showNotice('#labelNotice', 'No box named "' + oldLabel + '" on ' + range.text + '.', true);
         return;
     }
 
-    var section = null;
-    if ($('#renameFromHere').is(':checked')) {
-        section = labelSectionFrom(oldLabel, g_currentFrameNr);
-        if (section.length === 0) {
-            alert('No box named "' + oldLabel + '" on the current frame (' + g_currentFrameNr + ').');
-            return;
-        }
-    }
-    var inRange = function(fn) { return section === null || section.indexOf(parseInt(fn, 10)) !== -1; };
-    var where = section === null ? 'this video' : framesText(section);
-
-    var newLabel = prompt('Rename label "' + oldLabel + '" to' +
-        (section === null ? '' : ' (' + where + ')') + ':', oldLabel);
+    var newLabel = prompt('Rename "' + oldLabel + '" on ' + range.text + ' to:', oldLabel);
     if (newLabel === null) return; // Cancelled
     newLabel = newLabel.trim();
     if (!newLabel || newLabel === oldLabel) return;
 
-    var renameCount = 0;
-    for (var rf in g_boxes) {
-        if (!inRange(rf)) continue;
-        for (var ri = 0; ri < g_boxes[rf].length; ri++)
-            if (g_boxes[rf][ri].label === oldLabel) renameCount++;
-    }
-    if (renameCount === 0) {
-        alert('No box named "' + oldLabel + '" in ' + where + '.');
-        return;
-    }
-
-    var existingCount = 0;
-    for (var fn in g_boxes) {
-        if (!inRange(fn)) continue;
-        var boxesInFn = g_boxes[fn];
-        for (var bi = 0; bi < boxesInFn.length; bi++) {
-            if (boxesInFn[bi].label === newLabel) existingCount++;
-        }
-    }
-    if (existingCount > 0) {
-        var proceed = confirm(
-            '"' + newLabel + '" is already used on ' + existingCount + ' other box(es) in ' +
-            where + '.\n\n' +
-            'Merging is permanent — you won\'t be able to tell old "' + newLabel + '" boxes apart ' +
-            'from the renamed ones afterward.\n\n' +
-            'Tip: if you also want the existing "' + newLabel + '" boxes to become something else, ' +
-            'rename those first.\n\n' +
-            'Continue and merge anyway?'
-        );
-        if (!proceed) return;
-    }
-
     var newColor = stringToColor(newLabel);
     var skippedFrames = [];
+    var renamed = [];
     for (var frame_nr in g_boxes) {
         if (!inRange(frame_nr)) continue;
         var boxesInFrame = g_boxes[frame_nr];
-        var targetExists = false;
-        for (var i = 0; i < boxesInFrame.length; i++) {
-            if (boxesInFrame[i].label === newLabel) { targetExists = true; break; }
-        }
+        var targetExists = frameHasLabel(frame_nr, newLabel);
         for (var k = 0; k < boxesInFrame.length; k++) {
             if (boxesInFrame[k].label !== oldLabel) continue;
             if (targetExists) {
                 skippedFrames.push(frame_nr);
                 continue;
             }
+            renamed.push({box: boxesInFrame[k], label: oldLabel, color: boxesInFrame[k].color});
             boxesInFrame[k].label = newLabel;
             boxesInFrame[k].color = newColor;
         }
     }
 
-    g_annotationHasChanged = true;
+    if (renamed.length > 0) {
+        g_undoStack.push({type: 'custom', undo: function() {
+            for (var u = 0; u < renamed.length; u++) {
+                renamed[u].box.label = renamed[u].label;
+                renamed[u].box.color = renamed[u].color;
+            }
+        }});
+        g_annotationHasChanged = true;
+    }
     rebuildLabelDropdown();
-    select.value = newLabel;
-    $('#boxLabel').val(newLabel);
+    if (renamed.length > 0) {
+        select.value = newLabel;
+        $('#boxLabel').val(newLabel);
+    }
     redrawSequence();
 
-    if (skippedFrames.length > 0) {
-        alert('Renamed ' + (section === null ? 'everywhere' : 'on ' + where) +
-            ' except frame(s) ' + skippedFrames.join(', ') +
-            ', which already had a box labeled "' + newLabel + '". Those were left as "' + oldLabel + '".');
-    }
+    showNotice('#labelNotice', 'Renamed ' + renamed.length + ' box(es) "' + oldLabel + '" → "' +
+        newLabel + '" on ' + range.text + '.' + (renamed.length ? ' Ctrl+Z undoes.' : '') +
+        (skippedFrames.length ? ' Not on frame(s) ' + skippedFrames.join(', ') +
+            ': they already have a "' + newLabel + '" box, so those stay "' + oldLabel + '".' : ''),
+        skippedFrames.length > 0);
 }
 
-// Deletes the boxes with the label selected in the dropdown. With "Only from
-// the current frame onward" ticked, it deletes only the run of consecutive
-// frames that starts on the current frame and ends before the first frame
-// without that label, so a later section with the same name is kept.
-// Otherwise it deletes the label in the whole video. One Ctrl+Z restores all.
+// Fills the Rename label / Delete boxes frame range for a label: from `frame` (or the label's
+// first frame, if `frame` has no box with it) to the end of that section.
+function setDeleteRange(label, frame) {
+    var from = null;
+    if (frameHasLabel(frame, label)) {
+        from = frame;
+    } else {
+        for (var key in g_boxes) {
+            var f = parseInt(key, 10);
+            if (frameHasLabel(key, label) && (from === null || f < from)) from = f;
+        }
+    }
+    if (from === null) {
+        $('#labelFromFrame, #labelToFrame').val('');
+        return;
+    }
+    var section = labelSectionFrom(label, from);
+    $('#labelFromFrame').val(from);
+    $('#labelToFrame').val(section[section.length - 1]);
+}
+
+// Sets the From/To range to the whole video: the loaded frames
+// (g_sequenceLength is end - start with an inclusive end), widened to any
+// frame that has boxes.
+function setWholeVideoRange() {
+    var from = g_startFrame, to = g_startFrame + g_sequenceLength;
+    for (var key in g_boxes) {
+        if (!g_boxes[key].length) continue;
+        var f = parseInt(key, 10);
+        if (f < from) from = f;
+        if (f > to) to = f;
+    }
+    $('#labelFromFrame').val(from);
+    $('#labelToFrame').val(to);
+}
+
+// Clicking a box shows its name in Used labels and fills the From/To
+// range with its section from the current frame.
+function showBoxLabel(box) {
+    if (!box || !box.label) return;
+    var select = document.getElementById('usedLabelsSelect');
+    if (!select) return;
+    select.value = box.label;
+    setDeleteRange(box.label, g_currentFrameNr);
+}
+
+// Deletes the boxes with the label selected in Used labels on the frames in
+// the From/To range (both included). One Ctrl+Z restores all of them.
 function deleteSelectedLabel() {
     var select = document.getElementById('usedLabelsSelect');
     if (!select) return;
     var label = select.value;
     if (!label) {
-        alert('Select the label of the boxes to delete.');
+        alert('Select the label of the boxes to delete, or click one of the boxes.');
         return;
     }
-    var frames = [];
-    var where;
-    if ($('#renameFromHere').is(':checked')) {
-        frames = labelSectionFrom(label, g_currentFrameNr);
-        if (frames.length === 0) {
-            alert('No box named "' + label + '" on the current frame (' + g_currentFrameNr + ').');
-            return;
-        }
-        where = 'on ' + framesText(frames);
-    } else {
-        for (var key in g_boxes)
-            if (frameHasLabel(key, label)) frames.push(key);
-        if (frames.length === 0) {
-            alert('No box named "' + label + '" in this video.');
-            return;
-        }
-        where = 'in the whole video (' + frames.length + ' frame(s))';
-    }
-
-    var count = 0;
-    frames.forEach(function(fr) {
-        g_boxes[fr].forEach(function(b) { if (b.label === label) count++; });
-    });
-    if (!confirm('Delete ' + count + ' box(es) named "' + label + '" ' + where + '?\n\n' +
-                 'Ctrl+Z brings them all back.'))
-        return;
+    var r = labelFrameRange();
+    if (!r) return;
+    var from = r.from, to = r.to;
 
     var removed = [];
-    frames.forEach(function(fr) {
+    for (var fr in g_boxes) {
+        var n = parseInt(fr, 10);
+        if (n < from || n > to) continue;
         var boxes = g_boxes[fr];
         for (var i = 0; i < boxes.length; ) {
             if (boxes[i].label === label)
@@ -561,11 +571,41 @@ function deleteSelectedLabel() {
             else
                 i++;
         }
-    });
+    }
+    var range = r.text;
+    if (removed.length === 0) {
+        showNotice('#labelNotice', 'No box named "' + label + '" on ' + range + '.', true);
+        return;
+    }
     g_undoStack.push({type: 'removeMany', removed: removed});
     g_annotationHasChanged = true;
     rebuildLabelDropdown();
     redrawSequence();
+    showNotice('#labelNotice', 'Deleted ' + removed.length + ' box(es) named "' + label + '" on ' +
+        range + '. Ctrl+Z undoes.');
+}
+
+// Shows a short message that fades out by itself, so nothing has to be
+// clicked away. Important messages are orange and stay longer.
+var g_noticeTimers = {};
+function showNotice(selector, text, important) {
+    var el = $(selector);
+    clearTimeout(g_noticeTimers[selector]);
+    el.stop(true, true).text(text).css('color', important ? '#ffb040' : '').show();
+    g_noticeTimers[selector] = setTimeout(function() { el.fadeOut(600); },
+                                          important ? 10000 : 4000);
+}
+
+// One undo step per move/resize drag (only if the box actually changed).
+function recordDragUndo() {
+    var s = g_dragStart;
+    g_dragStart = null;
+    if (!s) return;
+    var b = s.box;
+    if (b.x === s.x && b.y === s.y && b.width === s.width && b.height === s.height) return;
+    g_undoStack.push({type: 'custom', undo: function() {
+        b.x = s.x; b.y = s.y; b.width = s.width; b.height = s.height;
+    }});
 }
 
 function clamp(v, lo, hi) {
