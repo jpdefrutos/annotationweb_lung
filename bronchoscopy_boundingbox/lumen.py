@@ -66,6 +66,8 @@ class Params:
     track_iou2: float = None    # same for level 2 (None = track_iou)
     max_lost: int = 5           # frames a track survives without a match
     min_track_len: int = 2      # with tracking: drop main boxes whose track is in fewer frames
+    handoff: bool = True        # a nested box that becomes a main box keeps its track
+    handoff_cover: float = 0.5  # ... if at least this much of it lies inside the new main box
 
     @property
     def iou2(self):
@@ -83,6 +85,7 @@ PARAM_LIMITS = {
     "track": (bool, None, None),
     "track_iou": (float, 0.0, 1.0),
     "track_iou2": (float, 0.0, 1.0),
+    "handoff": (bool, None, None),
     # max_lost and min_track_len together set the look-ahead past each chunk,
     # (min_track_len - 1) * (max_lost + 1) frames: at most 44 with these limits.
     "max_lost": (int, 0, 10),
@@ -432,15 +435,19 @@ class IoUTracker:
     def reset(self):
         self.tracks = {}
 
-    def update(self, boxes):
-        """Returns a track ID for each box, in order."""
+    def update(self, boxes, adopt=None):
+        """
+        Returns a track ID for each box, in order. adopt(js, boxes), if given,
+        may hand boxes that matched no track an existing track from elsewhere:
+        it returns {j: (track id, entry)} and the entry is taken over.
+        """
         ids = list(self.tracks)
         prev = [self.tracks[t]["box"] for t in ids]
         out = [None] * len(boxes)
         matched = set()
         for i, j, _ in match(prev, boxes, self.iou_thr):
             t = ids[i]
-            self.tracks[t] = {"box": boxes[j], "lost": 0, "n": self.tracks[t]["n"] + 1}
+            self.tracks[t] = dict(self.tracks[t], box=boxes[j], lost=0, n=self.tracks[t]["n"] + 1)
             out[j] = t
             matched.add(t)
         for t in ids:
@@ -448,6 +455,12 @@ class IoUTracker:
                 self.tracks[t]["lost"] += 1
                 if self.tracks[t]["lost"] > self.max_lost:
                     del self.tracks[t]
+        if adopt:
+            for j, (t, entry) in adopt([j for j in range(len(boxes)) if out[j] is None],
+                                       boxes).items():
+                self.tracks[t] = {"box": boxes[j], "lost": 0, "n": entry["n"] + 1,
+                                  "adopted": 1}
+                out[j] = t
         for j, b in enumerate(boxes):
             if out[j] is None:
                 out[j] = self.new_id()
@@ -455,7 +468,8 @@ class IoUTracker:
         return out
 
     def dump(self):
-        return {str(t): {"box": [int(v) for v in d["box"]], "lost": d["lost"], "n": d["n"]}
+        return {str(t): dict({"box": [int(v) for v in d["box"]], "lost": d["lost"], "n": d["n"]},
+                             **({"adopted": 1} if d.get("adopted") else {}))
                 for t, d in self.tracks.items()}
 
     @staticmethod
@@ -466,6 +480,8 @@ class IoUTracker:
             if len(box) != 4:
                 raise ValueError("track box must have 4 values")
             out[int(t)] = {"box": box, "lost": int(x["lost"]), "n": int(x.get("n", 1))}
+            if x.get("adopted"):
+                out[int(t)]["adopted"] = 1
         return out
 
 
@@ -541,7 +557,8 @@ class Runner:
             if self.prev is None or f != self.prev + 1:
                 for t in self.trackers.values():
                     t.reset()                       # never link across a gap
-            id1 = self.trackers[1].update(l1)
+            id1 = self.trackers[1].update(
+                l1, self._adopt_nested if p.handoff and p.levels > 1 else None)
             id2 = self.trackers[2].update([b for b, _ in l2]) if p.levels > 1 else []
             prefix = "T"
         else:
@@ -552,9 +569,42 @@ class Runner:
 
         rows = [_row(f, prefix, box, 1, bid, None, self.run_id)
                 for box, bid in zip(l1, id1)]
+        if p.track:
+            for r in rows:
+                if self.trackers[1].tracks.get(r["box_id"], {}).get("adopted"):
+                    r["was_nested"] = True
         rows += [_row(f, prefix, box, 2, bid, id1[pi], self.run_id)
                  for (box, pi), bid in zip(l2, id2)]
         return rows
+
+    def _adopt_nested(self, js, boxes):
+        """
+        Handoff: when the scope moves closer, a large opening leaves the image
+        and the openings nested in it become main boxes. A new main box (one
+        that continued no main track) takes over the track of a recently seen
+        nested box if at least handoff_cover of that box lies inside it, so
+        the opening keeps its ID and name. Only one-to-one pairs are taken: a
+        new box covering two nested boxes is most likely their parent again.
+        """
+        nested = self.trackers[2].tracks
+        cover = {}                  # j -> [nested track ids it covers]
+        for j in js:
+            bx, by, bw, bh = boxes[j]
+            for t, d in nested.items():
+                x, y, w, h = d["box"]
+                iw = min(bx + bw, x + w) - max(bx, x)
+                ih = min(by + bh, y + h) - max(by, y)
+                if iw > 0 and ih > 0 and iw * ih >= self.p.handoff_cover * w * h:
+                    cover.setdefault(j, []).append(t)
+        used = {}
+        for ts in cover.values():
+            for t in ts:
+                used[t] = used.get(t, 0) + 1
+        out = {}
+        for j, ts in cover.items():
+            if len(ts) == 1 and used[ts[0]] == 1:
+                out[j] = (ts[0], nested.pop(ts[0]))
+        return out
 
     def process(self, frame_nrs):
         """
@@ -579,8 +629,9 @@ class Runner:
             return []
         filtering = p.track and p.min_track_len > 1
         continues = self.prev is not None and frame_nrs[0] == self.prev + 1
-        # level-1 track id -> frames seen before this chunk
-        before = ({tid: d["n"] for tid, d in self.trackers[1].tracks.items()}
+        # track id -> frames seen before this chunk (both levels: a nested
+        # track may be handed over to level 1 in this chunk)
+        before = ({tid: d["n"] for t in self.trackers.values() for tid, d in t.tracks.items()}
                   if filtering and continues else {})
 
         rows = []
@@ -599,10 +650,12 @@ class Runner:
             ahead += self.frame(f)
         self._load(snapshot)
 
+        # Frames a track spent as a nested box count too, for tracks handed
+        # over to level 1 (IDs are unique across levels, so this changes
+        # nothing for other tracks).
         seen = dict(before)
         for r in rows + ahead:
-            if r["level"] == 1:
-                seen[r["box_id"]] = seen.get(r["box_id"], 0) + 1
+            seen[r["box_id"]] = seen.get(r["box_id"], 0) + 1
         parents = {(r["frame_nr"], r["box_id"]) for r in rows
                    if r["level"] == 1 and seen[r["box_id"]] >= p.min_track_len}
         out = [r for r in rows if (r["frame_nr"], r["box_id"] if r["level"] == 1

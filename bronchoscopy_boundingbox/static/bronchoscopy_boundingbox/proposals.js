@@ -219,8 +219,11 @@ function parentName(p) {
 // Sets r.letter and returns the suggested name. parentLabels holds the names
 // of this response's main boxes ("frame|box_id" -> name), which may be hidden
 // and so not findable through parentName().
-function suggestedName(r, parentLabels) {
+function suggestedName(r, parentLabels, ownName) {
     var tracked = r.label.charAt(0) === 'T';
+    // A handed-over box normally takes its track's earlier name (see
+    // syncHandedOverNames), so it only gets a letter of its own if it has none.
+    if (r.was_nested && r.level === 1 && !ownName) return r.label;
     var scope = r.run_id + (tracked ? '' : '|f' + r.frame_nr);
     var trackKey = scope + '|' + r.box_id;
     if (r.level === 1) {
@@ -245,6 +248,39 @@ function refreshChildNames() {
             var pn = parentName(c);
             if (!pn) continue;
             c.label = c.placeholder = pn + ',' + c.letter;
+        }
+    }
+    syncHandedOverNames();
+}
+
+// A nested box that became a main box (the server marks it was_nested, e.g.
+// when the scope passes its parent) keeps its track and so its name: while
+// still unrenamed it takes the name of the track's latest earlier suggestion
+// or accepted box. Walks frames in order so the name carries through.
+function syncHandedOverNames() {
+    var frames = {};
+    for (var f in g_proposals) frames[f] = true;
+    for (var g in g_boxes) frames[g] = true;
+    var order = Object.keys(frames).map(Number).sort(function(a, b) { return a - b; });
+    var last = {};      // "run|box" -> {label, placeholder}
+    for (var i = 0; i < order.length; i++) {
+        var fr = order[i];
+        var boxes = g_boxes[fr] || [];
+        for (var j = 0; j < boxes.length; j++)
+            if (boxes[j].src)
+                last[boxes[j].src.run_id + '|' + boxes[j].src.box_id] = {label: boxes[j].label, placeholder: null};
+        var list = g_proposals[fr] || [];
+        for (var k = 0; k < list.length; k++) {
+            var p = list[k], key = p.run_id + '|' + p.box_id;
+            if (p.was_nested && p.level === 1 && p.label === p.placeholder) {
+                if (last[key]) {
+                    p.label = last[key].label;
+                    if (last[key].placeholder !== null) p.placeholder = last[key].placeholder;
+                } else if (/^T\d+$/.test(p.label)) {
+                    p.label = p.placeholder = suggestedName(p, {}, true);   // no earlier name
+                }
+            }
+            last[key] = {label: p.label, placeholder: p.placeholder};
         }
     }
 }

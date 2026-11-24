@@ -333,3 +333,35 @@ class TrackerStateTests(TestCase):
         tracks = lumen.IoUTracker.load_tracks(json.loads(json.dumps(t.dump())))
         t2 = lumen.IoUTracker(0.3, 5, lumen._IdCounter(ids.next_id), tracks)
         self.assertEqual(t2.update([(1, 0, 10, 10), (200, 200, 10, 10)]), [1, 3])
+
+
+class HandoffTests(TestCase):
+    """A nested box that becomes a main box keeps its track (Params.handoff)."""
+
+    def _runner(self, nested):
+        r = lumen.Runner({}, None, None, lumen.Params(levels=2))
+        r._ids.next_id = 100
+        r.trackers[2].tracks = {t: {"box": b, "lost": 0, "n": 3} for t, b in nested.items()}
+        return r
+
+    def test_each_child_continues_as_main_box(self):
+        r = self._runner({7: (100, 100, 50, 50), 8: (300, 100, 50, 50)})
+        ids = r.trackers[1].update([(90, 90, 80, 80), (290, 90, 80, 80)], r._adopt_nested)
+        self.assertEqual(ids, [7, 8])
+        self.assertEqual(r.trackers[1].tracks[7]["n"], 4)
+        self.assertEqual(r.trackers[2].tracks, {})
+        # the flag survives matching and the JSON round trip
+        r.trackers[1].update([(92, 90, 80, 80), (290, 92, 80, 80)])
+        tracks = lumen.IoUTracker.load_tracks(json.loads(json.dumps(r.trackers[1].dump())))
+        self.assertEqual(tracks[7].get("adopted"), 1)
+
+    def test_box_covering_both_children_is_new(self):
+        r = self._runner({7: (100, 100, 50, 50), 8: (200, 100, 50, 50)})
+        ids = r.trackers[1].update([(80, 80, 200, 100)], r._adopt_nested)
+        self.assertEqual(ids, [100])
+        self.assertEqual(set(r.trackers[2].tracks), {7, 8})
+
+    def test_child_mostly_outside_is_not_taken(self):
+        r = self._runner({7: (100, 100, 50, 50)})
+        ids = r.trackers[1].update([(140, 100, 80, 80)], r._adopt_nested)  # 20% inside
+        self.assertEqual(ids, [100])
