@@ -1,6 +1,7 @@
 import json
 import os
 import shutil
+import time
 from unittest import mock
 import tempfile
 import zlib
@@ -139,6 +140,9 @@ class LumenProposalTests(SyntheticVideoTestCase):
         self.assertEqual(self._propose(0, 1, params={'min_area': 'abc'}).status_code, 400)
         # min_area 0 would make every speck of noise a box (minutes per request)
         self.assertEqual(self._propose(0, 1, params={'min_area': 0}).status_code, 400)
+        # track_iou 0 would link boxes that do not overlap at all
+        self.assertEqual(self._propose(0, 1, params={'track_iou': 0}).status_code, 400)
+        self.assertEqual(self._propose(0, 1, params={'track_iou2': 0}).status_code, 400)
 
     def test_user_not_on_task_is_refused(self):
         other = User.objects.create_user('other', password='x')
@@ -167,33 +171,44 @@ class LumenProposalTests(SyntheticVideoTestCase):
             self.assertEqual(r.status_code, 200, bad)
             self.assertTrue(r.json()['success'], bad)
 
-    def test_unsupported_frame_gives_readable_error(self):
+    def test_unsupported_frame_is_skipped_with_reason(self):
         path = os.path.join(self.frame_dir, 'seq_5.mhd')
         original = open(path).read()
         try:
             with open(path, 'w') as f:
                 f.write(original.replace('MET_UCHAR', 'MET_USHORT'))
             r = self._propose(5, 1)
-            self.assertEqual(r.status_code, 400)
-            self.assertIn('unsupported pixel type MET_USHORT', r.json()['message'])
+            self.assertEqual(r.status_code, 200)            # skipped, not fatal
+            self.assertEqual(r.json()['skipped'], [5])
+            self.assertIn('unsupported pixel type MET_USHORT', r.json()['skip_message'])
         finally:
             with open(path, 'w') as f:
                 f.write(original)
 
-    def test_damaged_frame_gives_readable_error(self):
+    def test_header_without_element_type_is_skipped(self):
+        path = os.path.join(self.frame_dir, 'seq_3.mhd')
+        original = open(path).read()
+        self.addCleanup(lambda: open(path, 'w').write(original))
+        with open(path, 'w') as f:
+            f.write('\n'.join(l for l in original.splitlines() if not l.startswith('ElementType')))
+        r = self._propose(3, 1)
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json()['skipped'], [3])
+
+    def test_damaged_frame_is_skipped_with_reason(self):
         raw = os.path.join(self.frame_dir, 'seq_6.zraw')
         original = open(raw, 'rb').read()
         try:
             with open(raw, 'wb') as f:
                 f.write(b'not zlib')
             r = self._propose(6, 1)
-            self.assertEqual(r.status_code, 400)
-            self.assertIn('Could not read seq_6.mhd', r.json()['message'])
+            self.assertEqual(r.json()['skipped'], [6])
+            self.assertIn('Could not read seq_6.mhd', r.json()['skip_message'])
         finally:
             with open(raw, 'wb') as f:
                 f.write(original)
 
-    def test_frame_of_other_size_gives_readable_error(self):
+    def test_frame_of_other_size_is_skipped_with_reason(self):
         self._propose(0, 1)                       # builds the scope-mask cache
         path = os.path.join(self.frame_dir, 'seq_7.mhd')
         original = open(path).read()
@@ -207,8 +222,8 @@ class LumenProposalTests(SyntheticVideoTestCase):
             with open(path, 'w') as f:
                 f.write(original.replace('DimSize = %d %d' % (W, H), 'DimSize = 120 100'))
             r = self._propose(7, 1)
-            self.assertEqual(r.status_code, 400)
-            self.assertIn('different size', r.json()['message'])
+            self.assertEqual(r.json()['skipped'], [7])
+            self.assertIn('different size', r.json()['skip_message'])
         finally:
             with open(path, 'w') as f:
                 f.write(original)
@@ -416,10 +431,22 @@ class BadFrameAfterChunkTests(SyntheticVideoTestCase):
         self.assertEqual(r.status_code, 200, r.content)
         self.assertEqual(r.json()['frames'], [0, 3])
 
-    def test_missing_frame_inside_chunk_is_still_an_error(self):
-        r = self._propose(4, 3)
-        self.assertEqual(r.status_code, 400)
-        self.assertIn('Frame 5', r.json()['message'])
+    def test_missing_frame_inside_chunk_is_skipped(self):
+        # one bad frame must not stop the whole-video load
+        r = self._propose(4, 3, params={'min_track_len': 1})
+        self.assertEqual(r.status_code, 200, r.content)
+        d = r.json()
+        self.assertEqual(d['frames'], [4, 6])
+        self.assertEqual(d['skipped'], [5])
+        self.assertEqual(sorted({row['frame_nr'] for row in d['rows']}), [4, 6])
+        # tracks start again after the gap
+        ids4 = {row['box_id'] for row in d['rows'] if row['frame_nr'] == 4}
+        ids6 = {row['box_id'] for row in d['rows'] if row['frame_nr'] == 6}
+        self.assertFalse(ids4 & ids6)
+        # kept (else a bad frame in the first chunk means a new run on every
+        # open), but Reload with unchanged settings (refresh) computes again
+        self.assertTrue(self._propose(4, 3, params={'min_track_len': 1}).json().get('cached'))
+        self.assertNotIn('cached', self._propose(4, 3, params={'min_track_len': 1}, refresh=1).json())
 
 
 class DamagedScopeCacheTests(SyntheticVideoTestCase):
@@ -471,3 +498,150 @@ class ProposalCacheTests(SyntheticVideoTestCase):
         r = self._propose(0, 5)
         self.assertEqual(r.status_code, 200, r.content)
         self.assertNotIn('cached', r.json())
+
+
+class CacheRobustnessTests(SyntheticVideoTestCase):
+    def _clear_scope_cache(self):
+        for n in os.listdir(self.cache_dir) if os.path.isdir(self.cache_dir) else []:
+            if n.endswith('_scope.npz'):
+                os.remove(os.path.join(self.cache_dir, n))
+
+    def test_replaced_frame_is_computed_again(self):
+        self._propose(0, 3)
+        self.assertTrue(self._propose(0, 3).json().get('cached'))
+        path = os.path.join(self.frame_dir, 'seq_1.zraw')
+        st = os.stat(path)
+        os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns + 10**9))
+        self.addCleanup(os.utime, path, ns=(st.st_atime_ns, st.st_mtime_ns))
+        self.assertNotIn('cached', self._propose(0, 3).json())
+
+    def test_no_write_access_to_cache_still_works(self):
+        self._clear_scope_cache()
+        with mock.patch.object(lumen.np, 'savez_compressed', side_effect=PermissionError('no')), \
+                mock.patch('bronchoscopy_boundingbox.views.json.dump', side_effect=PermissionError('no')):
+            r = self._propose(0, 2)
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertTrue(r.json()['rows'])
+
+    def test_damaged_sample_frame_does_not_stop_the_video(self):
+        self._clear_scope_cache()
+        raw = os.path.join(self.frame_dir, 'seq_0.zraw')      # always a sample
+        original = open(raw, 'rb').read()
+        self.addCleanup(lambda: open(raw, 'wb').write(original))
+        with open(raw, 'wb') as f:
+            f.write(b'not zlib')
+        r = self._propose(1, 3)
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertTrue(r.json()['rows'])
+
+
+class CacheKeyAndPruneTests(SyntheticVideoTestCase):
+    def _touch(self, name):
+        path = os.path.join(self.frame_dir, name)
+        st = os.stat(path)
+        os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns + 10**9))
+        self.addCleanup(os.utime, path, ns=(st.st_atime_ns, st.st_mtime_ns))
+
+    def test_frame_read_past_the_chunk_is_part_of_the_key(self):
+        params = {'min_track_len': 2, 'max_lost': 1}    # reads 2 frames past the chunk
+        self._propose(0, 3, params=params)
+        self.assertTrue(self._propose(0, 3, params=params).json().get('cached'))
+        self._touch('seq_4.zraw')                        # frame 4: look-ahead only
+        self.assertNotIn('cached', self._propose(0, 3, params=params).json())
+
+    def test_scope_sample_frame_is_part_of_the_key(self):
+        self._propose(0, 3)
+        self._touch('seq_9.zraw')                        # last frame: always a sample
+        self.assertNotIn('cached', self._propose(0, 3).json())
+
+    def test_unused_stored_suggestions_are_pruned(self):
+        from bronchoscopy_boundingbox import views
+        self._propose(0, 3)
+        folder = [os.path.join(self.cache_dir, d) for d in os.listdir(self.cache_dir)
+                  if d.endswith('_rows')][0]
+        old = os.path.join(folder, 'old.json')
+        with open(old, 'w') as f:
+            f.write('{}')
+        long_ago = time.time() - views.PROPOSAL_CACHE_MAX_AGE - 3600
+        os.utime(old, (long_ago, long_ago))
+        with mock.patch.object(views, '_last_prune', 0.0):
+            self._propose(3, 3)
+        self.assertFalse(os.path.exists(old))
+        self.assertTrue(os.listdir(folder))              # the ones in use stay
+
+
+class CacheFilesTests(SyntheticVideoTestCase):
+    def test_data_file_named_in_header_is_part_of_the_signature(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp)
+        mhd = os.path.join(tmp, 'frame_1.mhd')
+        data = os.path.join(tmp, 'pixels_0001.zraw')       # not the header's name
+        with open(mhd, 'w') as f:
+            f.write('NDims = 2\nElementDataFile = pixels_0001.zraw\n')
+        with open(data, 'wb') as f:
+            f.write(b'x')
+        self.assertEqual(lumen._data_file(mhd), data)
+        before = lumen.files_signature([mhd])
+        st = os.stat(data)
+        os.utime(data, ns=(st.st_atime_ns, st.st_mtime_ns + 10**9))
+        self.assertNotEqual(lumen.files_signature([mhd]), before)
+
+    def test_unused_scope_files_are_pruned_and_used_ones_kept(self):
+        from bronchoscopy_boundingbox import views
+        self._propose(0, 2)
+        old = os.path.join(self.cache_dir, 'seq0_old_scope.npz')
+        with open(old, 'wb') as f:
+            f.write(b'x')
+        long_ago = time.time() - views.PROPOSAL_CACHE_MAX_AGE - 3600
+        os.utime(old, (long_ago, long_ago))
+        used = [os.path.join(self.cache_dir, n) for n in os.listdir(self.cache_dir)
+                if n.endswith('_scope.npz') and n != 'seq0_old_scope.npz']
+        for u in used:
+            os.utime(u, (long_ago, long_ago))
+        with mock.patch.object(views, '_last_prune', 0.0):
+            self._propose(2, 2)          # reads the scope file (refreshes it), then prunes
+        self.assertFalse(os.path.exists(old))
+        self.assertTrue(all(os.path.exists(u) for u in used))
+
+
+class ScopeAndEmptyVideoTests(SyntheticVideoTestCase):
+    def test_sample_frames_are_read_once(self):
+        for n in os.listdir(self.cache_dir) if os.path.isdir(self.cache_dir) else []:
+            if n.endswith('_scope.npz'):
+                os.remove(os.path.join(self.cache_dir, n))
+        frames = {f: os.path.join(self.frame_dir, 'seq_%d.mhd' % f) for f in range(10)}
+        real = lumen.read_mhd
+        with mock.patch.object(lumen, 'read_mhd', side_effect=real) as m:
+            lumen.roi_and_mask(frames, self.cache_dir, 'once')
+        self.assertEqual(m.call_count, len(lumen.scope_sample_paths(frames)))
+
+    def test_video_without_frames_gives_clear_message(self):
+        self.sequence.nr_of_frames = 0
+        self.sequence.save()
+        r = self._propose(0, 1)
+        self.assertEqual(r.status_code, 400)
+        self.assertIn('no frames', r.json()['message'])
+
+
+class FailedCacheWriteTests(SyntheticVideoTestCase):
+    def test_no_temp_files_left_when_writing_fails(self):
+        for n in os.listdir(self.cache_dir) if os.path.isdir(self.cache_dir) else []:
+            if n.endswith('_scope.npz'):
+                os.remove(os.path.join(self.cache_dir, n))
+
+        def fail_after_partial_write(*args, **kwargs):
+            raise OSError('disk full')
+        with mock.patch.object(lumen.np, 'savez_compressed', side_effect=fail_after_partial_write), \
+                mock.patch('bronchoscopy_boundingbox.views.json.dump', side_effect=fail_after_partial_write):
+            r = self._propose(0, 2)
+        self.assertEqual(r.status_code, 200, r.content)
+        leftovers = [os.path.join(d, n) for d, _, names in os.walk(self.cache_dir)
+                     for n in names if '.tmp' in n]
+        self.assertEqual(leftovers, [])
+
+    def test_frame_reader_code_is_part_of_the_key(self):
+        from bronchoscopy_boundingbox import views
+        self._propose(0, 2)
+        self.assertTrue(self._propose(0, 2).json().get('cached'))
+        with mock.patch.object(views, '_lumen_code_hash', 'other-code'):
+            self.assertNotIn('cached', self._propose(0, 2).json())

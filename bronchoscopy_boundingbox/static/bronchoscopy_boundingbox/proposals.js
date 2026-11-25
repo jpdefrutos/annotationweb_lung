@@ -13,6 +13,8 @@ var g_imageSequenceID = null;
 var g_proposals = {};          // frame_nr -> [proposal]
 var g_proposalState = null;    // tracker state from the last response, sent back with the next chunk
 var g_selectedProposal = null;
+var g_acceptKeyFrames = {};    // frame_nr -> true if accepting a suggestion made it a key frame
+var g_coveredProposals = {};   // frame_nr -> suggestions of this load hidden under a box (shown again when the box goes)
 var g_proposalsVisible = true;  // Show suggestions switch; hiding never deletes them
 var g_overlapHideIou = 0.5;    // hide a suggestion that overlaps an accepted box this much
 var g_trackLetters = {};       // track key -> letter, so a track keeps its letter over frames
@@ -60,15 +62,23 @@ function setProposalStatus(text, isError) {
 var PROPOSAL_CHUNK = 100;
 var g_proposalLoad = 0;         // id of the current load; older responses are ignored
 
-function loadAllProposals() {
+// Pressing Reload suggestions without changing a setting computes everything
+// again instead of using the server's stored results (e.g. after a frame that
+// could not be read has been fixed).
+var g_lastProposalParams = null;
+
+function loadAllProposals(fromButton) {
     if (g_imageSequenceID === null) return;
     var load = ++g_proposalLoad;
     var first = g_startFrame, last = g_startFrame + g_sequenceLength;
-    var totals = {rows: 0, auto: 0, autoTracks: 0, dropped: 0, hidden: 0};
+    var totals = {rows: 0, auto: 0, autoTracks: 0, dropped: 0, hidden: 0, skipped: []};
     g_proposals = {};
+    g_coveredProposals = {};
     g_proposalState = null;
-    selectProposal(null);
+    if (g_selectedProposal) selectProposal(null);
     var params = JSON.stringify(proposalParams());
+    var refresh = fromButton === true && params === g_lastProposalParams;
+    g_lastProposalParams = params;
     var started = Date.now();
 
     function step(start) {
@@ -88,6 +98,7 @@ function loadAllProposals() {
                 count: count,
                 params: params,
                 state: g_proposalState ? JSON.stringify(g_proposalState) : '',
+                refresh: refresh ? 1 : '',
             },
             dataType: 'json'
         }).done(function(data) {
@@ -96,12 +107,14 @@ function loadAllProposals() {
             var r = storeProposalChunk(data);
             totals.rows += r.shown; totals.auto += r.auto.boxes; totals.autoTracks += r.auto.tracks;
             totals.dropped += data.dropped || 0; totals.hidden += r.hidden;
+            totals.skipped = totals.skipped.concat(data.skipped || []);
+            totals.skipMessage = totals.skipMessage || data.skip_message;
             if (r.auto.boxes)
                 showProposalNotice(r.auto.boxes + ' box(es) continuing ' + r.auto.tracks +
                     ' accepted track(s) in frames ' + data.frames[0] + '–' + data.frames[1] +
-                    ' were accepted automatically. Ctrl+Z undoes.', true);
+                    ' were accepted automatically. Undoing that Accept track (Ctrl+Z) takes them back too.', true);
             if (g_selectedProposal) showSelectedProposalInfo();
-            redrawSequence();
+            try { redrawSequence(); } catch (e) {}    // e.g. frame image not loaded: keep loading
             if (data.frames[1] < last) step(data.frames[1] + 1);
             else loadDone();
         }).fail(function(xhr) {
@@ -120,7 +133,16 @@ function loadAllProposals() {
             ' in frames ' + first + '–' + last + '.' +
             (totals.auto ? ' ' + totals.auto + ' box(es) continuing accepted tracks were accepted automatically.' : '') +
             (totals.dropped ? ' ' + totals.dropped + ' box(es) on short tracks were left out.' : '') +
-            (totals.hidden ? ' ' + totals.hidden + ' hidden because they overlap a box you already have.' : ''));
+            (totals.hidden ? ' ' + totals.hidden + ' hidden because they overlap a box you already have.' : '') +
+            (totals.skipped.length ? ' Frame(s) ' + skippedText(totals.skipped) +
+                ' could not be read and have no suggestions; tracks start again after them (' +
+                totals.skipMessage + '). Once fixed, press Reload suggestions.' : ''),
+            totals.skipped.length > 0);
+    }
+
+    function skippedText(list) {
+        return list.length > 10 ? list.slice(0, 10).join(', ') + ' and ' + (list.length - 10) + ' more'
+                                : list.join(', ');
     }
 
     step(first);
@@ -179,11 +201,12 @@ function iou(a, b) {
 
 // True if the suggestion overlaps a box already on its frame (accepted, drawn
 // by hand or loaded from an earlier save) with IoU >= g_overlapHideIou.
+// The box that a suggestion lies on (so it is not shown), or null.
 function coveredByBox(p) {
     var boxes = g_boxes[p.frame_nr] || [];
     for (var i = 0; i < boxes.length; i++)
-        if (iou(p, boxes[i]) >= g_overlapHideIou) return true;
-    return false;
+        if (iou(p, boxes[i]) >= g_overlapHideIou) return boxes[i];
+    return null;
 }
 
 // ── suggested names ──────────────────────────────────────────────────────────
@@ -231,13 +254,16 @@ function frameBranch(frame_nr) {
 // (run_id, parent_id), never by name, so renaming cannot break the link.
 function parentName(p) {
     if (p.level !== 2 || p.parent_id === null) return null;
-    var parent = { run_id: p.run_id, box_id: p.parent_id };
+    // tracked and frame_nr too: without tracking, IDs only hold within a frame (sameTrack)
+    var parent = { run_id: p.run_id, box_id: p.parent_id, tracked: p.tracked, frame_nr: p.frame_nr };
     var list = g_proposals[p.frame_nr] || [];
     for (var i = 0; i < list.length; i++)
         if (sameTrack(list[i], parent)) return list[i].label;
     var boxes = g_boxes[p.frame_nr] || [];
-    for (var j = 0; j < boxes.length; j++)
-        if (boxes[j].src && sameTrack(boxes[j].src, parent)) return boxes[j].label;
+    for (var j = 0; j < boxes.length; j++) {
+        var src = boxes[j].src || boxes[j].coveredSrc;
+        if (src && sameTrack(src, parent)) return boxes[j].label;
+    }
     return null;
 }
 
@@ -255,7 +281,18 @@ function suggestedName(r, parentLabels, ownName, frameRows) {
     if (r.level === 1) {
         var branch = frameBranch(r.frame_nr);
         if (!branch) return r.label;
-        r.letter = letterFor(scope + '|branch|' + branch, branch + '|' + trackKey);
+        // skip letters other main suggestions on this frame already have, or
+        // a box has (e.g. "1,2,1,a" saved in an earlier session)
+        var takenMain = function(letter) {
+            var rows = frameRows || [];
+            for (var i = 0; i < rows.length; i++) {
+                var s = rows[i];
+                if (s !== r && s.level === 1 &&
+                        g_trackLetters[branch + '|' + scope + '|' + s.box_id] === letter) return true;
+            }
+            return labelExistsInFrame(r.frame_nr, branch + ',' + letter);
+        };
+        r.letter = letterFor(scope + '|branch|' + branch, branch + '|' + trackKey, takenMain);
         return branch + ',' + r.letter;
     }
     var parent = parentLabels[r.frame_nr + '|' + r.parent_id] || parentName(r) || ('T' + r.parent_id);
@@ -311,9 +348,12 @@ function syncHandedOverNames() {
         var list = g_proposals[fr] || [];
         for (var k = 0; k < list.length; k++) {
             var p = list[k], key = p.run_id + '|' + p.box_id;
-            if (p.was_nested && p.level === 1 && p.label === p.placeholder) {
+            // still unrenamed: the suggested name, or the name taken from the
+            // track (syncedLabel), which follows when the track is renamed
+            if (p.was_nested && p.level === 1 &&
+                    (p.label === p.placeholder || p.label === p.syncedLabel)) {
                 if (last[key]) {
-                    p.label = last[key].label;
+                    p.label = p.syncedLabel = last[key].label;
                     if (last[key].placeholder !== null) p.placeholder = last[key].placeholder;
                 } else if (/^T\d+$/.test(p.label)) {
                     p.label = p.placeholder = suggestedName(p, {}, true);   // no earlier name
@@ -333,8 +373,10 @@ function storeProposals(rows, firstFrame, lastFrame) {
     var hidden = 0;
     var names = earlierTrackNames(firstFrame);
     var parentLabels = {}, byFrame = {};
-    for (var f = firstFrame; f <= lastFrame; f++)
+    for (var f = firstFrame; f <= lastFrame; f++) {
         delete g_proposals[f];
+        delete g_coveredProposals[f];
+    }
     for (var j = 0; j < rows.length; j++)
         (byFrame[rows[j].frame_nr] = byFrame[rows[j].frame_nr] || []).push(rows[j]);
     for (var i = 0; i < rows.length; i++) {
@@ -344,9 +386,19 @@ function storeProposals(rows, firstFrame, lastFrame) {
         r.label = r.placeholder;
         var key = r.run_id + '|' + r.box_id;
         if (tracked && key in names) r.label = names[key];
-        if (r.level === 1) parentLabels[r.frame_nr + '|' + r.box_id] = r.label;
-        if (coveredByBox(r)) {
+        r.load = g_proposalLoad;
+        var cover = coveredByBox(r);
+        if (r.level === 1) {
+            // A main suggestion on an accepted box (e.g. saved in an earlier
+            // session, so not linked to its suggestion) names its nested
+            // suggestions after that box, and keeps doing so after a rename.
+            parentLabels[r.frame_nr + '|' + r.box_id] = cover ? cover.label : r.label;
+            if (cover && !cover.src)
+                cover.coveredSrc = { run_id: r.run_id, box_id: r.box_id, tracked: !!r.tracked, frame_nr: r.frame_nr };
+        }
+        if (cover) {
             hidden++;
+            (g_coveredProposals[r.frame_nr] = g_coveredProposals[r.frame_nr] || []).push(r);
             continue;
         }
         if (!(r.frame_nr in g_proposals))
@@ -360,6 +412,51 @@ function storeProposals(rows, firstFrame, lastFrame) {
 }
 
 // ── lookup ───────────────────────────────────────────────────────────────────
+
+// Undo puts a suggestion back, unless it is from an older load (before Reload
+// suggestions): that load's suggestions were replaced, so it would show twice.
+// For a box accepted before the Reload, the new load's suggestion for that
+// opening was hidden under the box (g_coveredProposals); that one comes back.
+function restoreProposal(p) {
+    var f = p.frame_nr;
+    p.acceptedBox = null;
+    if (p.load === g_proposalLoad) {
+        var c = (g_coveredProposals[f] || []).indexOf(p);
+        if (c !== -1) g_coveredProposals[f].splice(c, 1);
+        (g_proposals[f] = g_proposals[f] || []).push(p);
+        return;
+    }
+    var covered = g_coveredProposals[f] || [];
+    for (var i = 0; i < covered.length; i++) {
+        var q = covered[i];
+        if (iou(p, q) >= g_overlapHideIou && !coveredByBox(q)) {
+            covered.splice(i, 1);
+            (g_proposals[f] = g_proposals[f] || []).push(q);
+            return;
+        }
+    }
+}
+
+// After boxes are deleted, moved, drawn or restored: a suggestion under a box
+// is hidden (as when loading), and one whose box is gone is shown again.
+function syncCoveredProposals() {
+    var frames = {};
+    for (var f in g_proposals) frames[f] = true;
+    for (var g in g_coveredProposals) frames[g] = true;
+    for (var fr in frames) {
+        var shown = [], hidden = [];
+        (g_proposals[fr] || []).concat(g_coveredProposals[fr] || []).forEach(function(p) {
+            // an accepted suggestion stays hidden while its own box exists,
+            // even if that box was resized or moved away from it
+            var ownBox = p.acceptedBox && (g_boxes[fr] || []).indexOf(p.acceptedBox) !== -1;
+            (ownBox || coveredByBox(p) ? hidden : shown).push(p);
+        });
+        if (shown.length) g_proposals[fr] = shown; else delete g_proposals[fr];
+        if (hidden.length) g_coveredProposals[fr] = hidden; else delete g_coveredProposals[fr];
+    }
+    if (g_selectedProposal && !proposalExists(g_selectedProposal))
+        selectProposal(null);
+}
 
 function proposalExists(p) {
     var list = g_proposals[p.frame_nr];
@@ -418,8 +515,9 @@ function selectProposal(p) {
     // Pre-fill the current name. For a suggested name, only its last part (the
     // letter) is selected, so typing "1" turns "1,2,1,a" into "1,2,1,1".
     var input = $('#proposalName');
-    input.val(p.label).focus();
-    var el = input[0];
+    var el = input.val(p.label)[0];
+    // no scrolling to the field: the image would move under the mouse
+    el.focus({preventScroll: true});
     var start = p.label === p.placeholder && p.letter ? p.label.lastIndexOf(',') + 1 : 0;
     el.setSelectionRange(start, p.label.length);
     redrawSequence();
@@ -459,13 +557,18 @@ function acceptProposalAs(p, name, recordUndo) {
     if (recordUndo === undefined) recordUndo = true;
     // addBox() marks the frame as a key frame; remember if that is new, so an
     // undo can take the mark away again (unacceptTrack)
-    p.addedKeyFrame = g_targetFrames.indexOf(p.frame_nr) === -1;
+    var newKeyFrame = g_targetFrames.indexOf(p.frame_nr) === -1;
     // no redraw per box: the callers redraw once when done
     var box = addBox(p.frame_nr, p.x, p.y, p.x + p.width, p.y + p.height, name, undefined, recordUndo, false, false);
     if (!box) return null;
+    if (newKeyFrame) g_acceptKeyFrames[p.frame_nr] = true;
     // in memory only; for parentName() and continuing accepted tracks
-    box.src = { run_id: p.run_id, box_id: p.box_id, tracked: !!p.tracked };
+    // frame_nr: without tracking, IDs only hold within a frame (sameTrack)
+    box.src = { run_id: p.run_id, box_id: p.box_id, tracked: !!p.tracked, load: p.load, frame_nr: p.frame_nr };
     removeProposal(p);
+    // kept under its box: if the box is deleted, the suggestion comes back
+    p.acceptedBox = box;
+    (g_coveredProposals[p.frame_nr] = g_coveredProposals[p.frame_nr] || []).push(p);
     g_annotationHasChanged = true;
     return box;
 }
@@ -486,8 +589,10 @@ function acceptSelectedProposal() {
         alert('This frame already has a box named "' + name + '" (or the box is too small).');
         return;
     }
+    var group = [{proposal: p, box: box}];
+    box.acceptGroup = group;
     g_undoStack.push({type: 'custom', undo: function() {
-        unacceptTrack([{proposal: p, box: box}], 'Undid Accept: the box is a suggestion again.');
+        unacceptTrack(group, group.length === 1 ? 'Undid Accept: the box is a suggestion again.' : undefined);
     }});
     refreshChildNames();
     rebuildLabelDropdown();
@@ -545,7 +650,7 @@ function renameSelectedTrack() {
     var oldLabels = list.map(function(q) { return q.label; });
     for (var i = 0; i < list.length; i++)
         list[i].label = name;
-    g_undoStack.push({type: 'custom', undo: function() {
+    g_undoStack.push({type: 'custom', boxes: false, undo: function() {
         for (var j = 0; j < list.length; j++)
             list[j].label = oldLabels[j];
         refreshChildNames();
@@ -568,12 +673,15 @@ function acceptSelectedTrack() {
     // No confirmation: the result is shown in the notice line, and one Ctrl+Z
     // takes the whole track back to suggestions.
     var skipped = [], accepted = [];
+    accepted.track = true;      // Accept track: later chunks continue it (autoAcceptContinuedTracks)
     for (var i = 0; i < list.length; i++) {
         var box = acceptProposalAs(list[i], name, false);
-        if (box)
+        if (box) {
             accepted.push({proposal: list[i], box: box});
-        else
+            box.acceptGroup = accepted;
+        } else {
             skipped.push(list[i].frame_nr);
+        }
     }
     if (accepted.length > 0)
         g_undoStack.push({type: 'custom', undo: function() { unacceptTrack(accepted); }});
@@ -593,13 +701,24 @@ function acceptSelectedTrack() {
 // the new frames too, under the same name. One undo step turns them all back
 // into suggestions. Returns {boxes, tracks} accepted.
 function autoAcceptContinuedTracks(first, last) {
-    var lookback = (parseInt($('#propMaxLost').val(), 10) || 0) + 1;
-    var accepted = {};      // "run|box" -> name on the latest of those frames
+    // max_lost as the server's tracker used it for this load (not the field,
+    // which may have been changed since)
+    var params = g_proposalState && g_proposalState.params;
+    var lookback = (params && params.max_lost !== undefined ? params.max_lost
+                    : parseInt($('#propMaxLost').val(), 10) || 0) + 1;
+    // "run|box" -> {name, group}: tracks accepted from this load's suggestions
+    // (after Reload, boxes from the earlier load do not count: the annotator
+    // may have rejected or deleted parts of those tracks)
+    var accepted = {};
     for (var f = first - lookback; f < first; f++) {
         var boxes = g_boxes[f] || [];
-        for (var i = 0; i < boxes.length; i++)
-            if (boxes[i].src && boxes[i].src.tracked)
-                accepted[boxes[i].src.run_id + '|' + boxes[i].src.box_id] = boxes[i].label;
+        for (var i = 0; i < boxes.length; i++) {
+            var src = boxes[i].src;
+            // only Accept track continues; a single accept (Ctrl+Enter) means only that box
+            if (src && src.tracked && src.load === g_proposalLoad &&
+                    boxes[i].acceptGroup && boxes[i].acceptGroup.track)
+                accepted[src.run_id + '|' + src.box_id] = {name: boxes[i].label, group: boxes[i].acceptGroup};
+        }
     }
     if (Object.keys(accepted).length === 0) return {boxes: 0, tracks: 0};
     var done = [], tracks = {};
@@ -609,18 +728,21 @@ function autoAcceptContinuedTracks(first, last) {
         for (var k = 0; k < list.length; k++) {
             var key = list[k].run_id + '|' + list[k].box_id;
             if (!list[k].tracked || !(key in accepted)) continue;
-            var box = acceptProposalAs(list[k], accepted[key], false);
+            var box = acceptProposalAs(list[k], accepted[key].name, false);
             if (box) {
-                done.push({proposal: list[k], box: box});
+                // Joins the Accept (track) it continues: undoing that accept
+                // takes these back too. No undo step of its own, so a chunk
+                // arriving in the background never comes between the
+                // annotator's own actions on the Ctrl+Z list.
+                var entry = {proposal: list[k], box: box};
+                accepted[key].group.push(entry);
+                box.acceptGroup = accepted[key].group;
+                done.push(entry);
                 tracks[key] = true;
             }
         }
     }
     if (done.length > 0) {
-        g_undoStack.push({type: 'custom', undo: function() {
-            unacceptTrack(done, 'Undid the automatic accept: ' + done.length +
-                ' box(es) are suggestions again.');
-        }});
         refreshChildNames();
         rebuildLabelDropdown();
     }
@@ -630,21 +752,24 @@ function autoAcceptContinuedTracks(first, last) {
 // Undo for Accept / Accept track: removes the accepted boxes and turns them
 // back into suggestions.
 function unacceptTrack(accepted, notice) {
-    // Frames that the accept made key frames (by any of its boxes, e.g. a
-    // parent and its child on the same frame) lose the mark again if empty,
-    // else saving would store an empty annotated frame.
-    var marked = {};
+    // A frame that an accept made a key frame (whichever accept, e.g. a parent
+    // and its child on the same frame undone in any order) loses the mark
+    // again once it is empty, else saving would store an empty annotated frame.
+    var touched = {};
     for (var i = 0; i < accepted.length; i++) {
         var a = accepted[i], f = a.proposal.frame_nr;
         var boxes = g_boxes[f] || [];
         var k = boxes.indexOf(a.box);
         if (k !== -1) boxes.splice(k, 1);
-        if (a.proposal.addedKeyFrame) marked[f] = true;
-        (g_proposals[f] = g_proposals[f] || []).push(a.proposal);
+        touched[f] = true;
+        restoreProposal(a.proposal);
     }
-    for (var m in marked) {
+    for (var m in touched) {
         var fn = parseInt(m, 10);
-        if (!(g_boxes[fn] && g_boxes[fn].length)) removeKeyFrame(fn);
+        if (g_acceptKeyFrames[fn] && !(g_boxes[fn] && g_boxes[fn].length)) {
+            removeKeyFrame(fn);
+            delete g_acceptKeyFrames[fn];
+        }
     }
     refreshChildNames();
     showProposalNotice(notice || ('Undid Accept track: ' + accepted.length + ' box(es) are suggestions again.'));
@@ -661,10 +786,9 @@ function rejectSelectedTrack() {
     if (list.length === 0) return;
     for (var i = 0; i < list.length; i++)
         removeProposal(list[i]);
-    g_undoStack.push({type: 'custom', undo: function() {
+    g_undoStack.push({type: 'custom', boxes: false, undo: function() {
         for (var j = 0; j < list.length; j++) {
-            var f = list[j].frame_nr;
-            (g_proposals[f] = g_proposals[f] || []).push(list[j]);
+            restoreProposal(list[j]);
         }
         refreshChildNames();
         showProposalNotice('Undid Reject track: ' + list.length + ' suggestion(s) are back.');
@@ -675,8 +799,8 @@ function rejectSelectedTrack() {
 
 function rejectProposal(p) {
     removeProposal(p);
-    g_undoStack.push({type: 'custom', undo: function() {
-        (g_proposals[p.frame_nr] = g_proposals[p.frame_nr] || []).push(p);
+    g_undoStack.push({type: 'custom', boxes: false, undo: function() {
+        restoreProposal(p);
         refreshChildNames();
     }});
     redrawSequence();
@@ -709,18 +833,25 @@ function setProposalsVisible(visible) {
 // ── hover ────────────────────────────────────────────────────────────────────
 
 // Hovering a suggestion shows how many frames from here on belong to the same
-// track, without having to click it. Computed on every move (a few
-// thousand suggestions at most), so it is never stale after a rename or accept.
+// track, without having to click it.
+var g_hover = null;             // {proposal, html, time} of the hovered suggestion
+
 function updateProposalHover(e, x, y) {
     var p = proposalUnderCursor(x, y, isInsideBox(x, y));
     if (!p) { hideProposalHover(); return; }
+    // hoverText scans the whole video's suggestions, so it is only redone when
+    // another suggestion is hovered, or after half a second (rename, accept...)
+    var now = Date.now();
+    if (!g_hover || g_hover.proposal !== p || now - g_hover.time > 500)
+        g_hover = {proposal: p, html: hoverText(p), time: now};
     var tip = $('#proposalHover');
     if (tip.length === 0)
         tip = $('<div id="proposalHover"></div>').appendTo('body');
-    tip.html(hoverText(p)).css({left: e.pageX + 14, top: e.pageY + 14}).show();
+    tip.html(g_hover.html).css({left: e.pageX + 14, top: e.pageY + 14}).show();
 }
 
 function hideProposalHover() {
+    g_hover = null;
     $('#proposalHover').hide();
 }
 
@@ -776,7 +907,10 @@ function setupProposals() {
             setProposalStatus('Press Reload suggestions to use the new settings.');
     });
 
-    $('#reloadProposalsButton').click(loadAllProposals);
+    // a key may change the frame or the suggestion under the cursor; the hover
+    // box comes back with the next mouse move
+    $(document).keydown(hideProposalHover);
+    $('#reloadProposalsButton').click(function() { loadAllProposals(true); });
     $('#showProposals').change(function() { setProposalsVisible(this.checked); });
 
     $('#renameTrackButton').click(renameSelectedTrack);
@@ -789,6 +923,7 @@ function setupProposals() {
         if (!g_selectedProposal) return;
         var inName = e.target.id === 'proposalName';
         if (e.which === 13 && e.ctrlKey) {
+            if (!inName && isTextEntry(e.target)) return;  // e.g. typing a comment
             e.preventDefault();
             acceptSelectedProposal();
         } else if (e.which === 13 && inName) {

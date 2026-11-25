@@ -184,6 +184,16 @@ function setupSliderMark(frame, color) {
     console.log('Made marker');
 }
 
+// True for elements where keys type text: text-type inputs, textareas and
+// editable elements (not checkboxes, buttons or selects). Keyboard shortcuts
+// leave keys there alone.
+function isTextEntry(t) {
+    if (!t || !t.tagName) return false;
+    if (t.tagName === 'INPUT')
+        return /^(text|search|number|email|password|url|tel)?$/i.test(t.getAttribute('type') || '');
+    return t.tagName === 'TEXTAREA' || !!t.isContentEditable;
+}
+
 function addKeyFrame(frame_nr, color) {
     color = typeof color !== 'undefined' ? color : '#0077b3';
     if(g_targetFrames.includes(frame_nr)) // Already exists
@@ -381,12 +391,14 @@ function loadSequence(image_sequence_id, start_frame, nrOfFrames, show_entire_se
         // While typing in a text field the arrows move the text cursor, not
         // the frame. Checkboxes, buttons etc. keep the arrows for the frames,
         // and so does a text field marked data-frame-arrows.
-        var t = event.target, tag = t.tagName;
-        var textInput = tag === 'INPUT' && /^(text|search|number|email|password|url|tel)?$/i.test(t.getAttribute('type') || '');
-        if(t.hasAttribute && t.hasAttribute('data-frame-arrows')) {
+        var t = event.target;
+        // A field marked data-frame-arrows, and a dropdown (e.g. after picking
+        // a label), keep Left/Right for the frames: its text or option stays
+        // as it is (Up/Down still change a dropdown's option).
+        if((t.hasAttribute && t.hasAttribute('data-frame-arrows')) || t.tagName === 'SELECT') {
             if(event.which === 37 || event.which === 39)
-                event.preventDefault();     // keep the text and its selection as they are
-        } else if(textInput || tag === 'TEXTAREA' || tag === 'SELECT' || t.isContentEditable)
+                event.preventDefault();
+        } else if(isTextEntry(t))
             return;
         if(event.which === 37) { // Left
             if(g_shiftKeyPressed) {

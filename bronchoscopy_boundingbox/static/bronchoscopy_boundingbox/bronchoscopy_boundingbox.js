@@ -65,6 +65,8 @@ function finishDrag() {
         g_paint = false;
         g_annotationHasChanged = true;
         addBox(g_currentFrameNr, g_BBx, g_BBy, g_BBx2, g_BBy2, getCurrentLabel());
+        refreshSuggestionNames();
+        redrawSequence();
     }
 }
 
@@ -81,7 +83,7 @@ function setupSegmentation() {
         // A suggestion smaller than the box under the cursor (e.g. a nested
         // child inside an accepted parent) wins, so it can be selected without
         // moving the parent first (proposals.js)
-        var proposal = e.shiftKey ? null : proposalUnderCursor(pos.x, pos.y, inside);
+        var proposal = e.shiftKey || !suggestionsLoaded() ? null : proposalUnderCursor(pos.x, pos.y, inside);
         if (proposal) {
             // Without this the browser's default mousedown action moves the
             // focus away from the Name field that selectProposal just focused,
@@ -102,7 +104,7 @@ function setupSegmentation() {
                 g_move = true;
             return;
         }
-        if (g_selectedProposal)
+        if (suggestionsLoaded() && g_selectedProposal)
             selectProposal(null);
         if (!getCurrentLabel()) {
             var el = document.getElementById('boxLabel');
@@ -117,6 +119,8 @@ function setupSegmentation() {
         g_hoverX = pos.x;
         g_hoverY = pos.y;
         applyDragMove(pos);
+        if (!suggestionsLoaded())
+            return;
         if (g_paint || g_move || g_resize)
             hideProposalHover();
         else
@@ -130,7 +134,8 @@ function setupSegmentation() {
     $('#canvas').mouseleave(function(e) {
         g_hoverX = null;
         g_hoverY = null;
-        hideProposalHover();
+        if (suggestionsLoaded())
+            hideProposalHover();
     });
 
     // The handlers above only fire while the cursor is over the canvas, so
@@ -154,14 +159,18 @@ function setupSegmentation() {
     // mouseup at all; drop it instead of leaving g_paint/g_move/g_resize stuck.
     $(window).on('blur', function() {
         g_paint = false;
-        g_move = false;
-        g_resize = false;
+        if (g_move || g_resize) {
+            // the move so far stays: give it its undo step and mark the change
+            g_move = false;
+            g_resize = false;
+            recordDragUndo();
+        }
     });
 
     $('#canvas').dblclick(function(e) {
         var pos = mousePos(e, this);
         var inside = isInsideBox(pos.x, pos.y);
-        var proposal = proposalUnderCursor(pos.x, pos.y, inside);
+        var proposal = suggestionsLoaded() ? proposalUnderCursor(pos.x, pos.y, inside) : null;
         if (proposal)
             rejectProposal(proposal);
         else if (inside.isInside)
@@ -177,7 +186,7 @@ function setupSegmentation() {
             if (g_hoverX === null || g_hoverY === null)
                 return;
             var inside = isInsideBox(g_hoverX, g_hoverY);
-            var proposal = proposalUnderCursor(g_hoverX, g_hoverY, inside);
+            var proposal = suggestionsLoaded() ? proposalUnderCursor(g_hoverX, g_hoverY, inside) : null;
             if (proposal)
                 rejectProposal(proposal);
             else if (inside.isInside)
@@ -197,9 +206,12 @@ function setupSegmentation() {
 
     $('#clearButton').click(function() {
         g_annotationHasChanged = true;
+        var hadBoxes = Object.keys(g_boxes).filter(function(f) { return g_boxes[f].length > 0; });
         g_boxes = {};
+        hadBoxes.forEach(dropKeyFrameIfEmpty);
         g_undoStack = [];
         $('#slider').slider('value', g_frameNr);
+        refreshSuggestionNames();
         redrawSequence();
         rebuildLabelDropdown();
     });
@@ -227,14 +239,12 @@ function setupSegmentation() {
     });
 
     rebuildLabelDropdown();
-    setupProposals();
 
     // Ctrl+C: copy current frame's boxes to the next frame
     // Ctrl+Shift+C: copy current frame's boxes to the previous frame
     $(document).keydown(function(e) {
         if (e.ctrlKey && e.which === 67) {
-            var tag = e.target.tagName;
-            if (tag === 'INPUT' || tag === 'TEXTAREA') // Don't hijack normal text copy (e.g. boxLabel field)
+            if (typingInField(e)) // Don't hijack normal text copy (e.g. boxLabel field)
                 return;
             e.preventDefault();
             if (e.shiftKey)
@@ -250,8 +260,7 @@ function setupSegmentation() {
     // European keyboard layouts and would misfire there)
     $(document).keydown(function(e) {
         if (e.ctrlKey && e.shiftKey && (e.which === 65 || e.which === 86)) {
-            var tag = e.target.tagName;
-            if (tag === 'INPUT' || tag === 'TEXTAREA')
+            if (typingInField(e))
                 return;
             e.preventDefault();
             if (e.which === 65)
@@ -262,15 +271,21 @@ function setupSegmentation() {
     });
 
     try { redrawSequence(); } catch(e) {}
+    try {
+        setupProposals();
+    } catch(e) {
+        console.error('Box suggestions could not start', e);
+    }
 }
 
-// True while the user is typing in a text field, where Ctrl+D / Ctrl+Z should
-// keep their normal meaning - except the suggestion Name field, which gets
+// True while the user is typing in a text field, where Ctrl+C / Ctrl+D / Ctrl+Z
+// etc. keep their normal meaning - except the suggestion Name field, which gets
 // focus whenever a suggestion is selected, so the box shortcuts keep working.
 function typingInField(e) {
-    var t = e.target;
-    if (t.id === 'proposalName') return false;
-    return t.tagName === 'INPUT' || t.tagName === 'TEXTAREA';
+    if (e.target.id === 'proposalName') return false;
+    // text-type fields only (isTextEntry, annotationweb.js): after clicking a
+    // checkbox or button the box shortcuts keep working
+    return isTextEntry(e.target);
 }
 
 function isInsideBox(x, y) {
@@ -292,13 +307,26 @@ function isInsideBox(x, y) {
     return { isInside: isInside, boxNr: boxNr, isInsideCorner: isInsideCorner };
 }
 
+// A key frame whose last box is deleted stops being a key frame, else it
+// would be saved as an annotated frame with no boxes. Key frames that never
+// had a box (e.g. added with Add frame to mark "no opening here") are kept,
+// since no box is deleted there. Returns true if the mark was removed.
+function dropKeyFrameIfEmpty(frame_nr) {
+    var f = parseInt(frame_nr, 10);
+    if ((g_boxes[f] || []).length > 0 || g_targetFrames.indexOf(f) === -1) return false;
+    removeKeyFrame(f);
+    return true;
+}
+
 function removeBox(boxNr, updateDropdown) {
     if (updateDropdown === undefined) updateDropdown = true;
     var frame_nr = g_currentFrameNr;
     var removed = g_boxes[frame_nr].splice(boxNr, 1)[0];
     if (removed)
-        g_undoStack.push({type: 'remove', frame_nr: frame_nr, box: removed, index: boxNr});
+        g_undoStack.push({type: 'remove', frame_nr: frame_nr, box: removed, index: boxNr,
+                          keyFrameDropped: dropKeyFrameIfEmpty(frame_nr)});
     g_annotationHasChanged = true;
+    refreshSuggestionNames();
     redrawSequence();
     if (updateDropdown)
         rebuildLabelDropdown();
@@ -325,7 +353,9 @@ function undoLastBoxAction() {
     if (action.type === 'custom') {
         // Multi-step actions from other scripts (e.g. Accept track) undo themselves.
         action.undo();
-        g_annotationHasChanged = true;
+        if (action.boxes !== false)     // not for suggestion-only steps (reject, rename track)
+            g_annotationHasChanged = true;
+        refreshSuggestionNames();
         redrawSequence();
         rebuildLabelDropdown();
         return;
@@ -336,9 +366,13 @@ function undoLastBoxAction() {
         var idx = g_boxes[action.frame_nr].indexOf(action.box);
         if (idx !== -1)
             g_boxes[action.frame_nr].splice(idx, 1);
+        if (action.newKeyFrame)         // the box made it a key frame: undo that too
+            dropKeyFrameIfEmpty(action.frame_nr);
     } else if (action.type === 'remove') {
         var insertAt = Math.min(action.index, g_boxes[action.frame_nr].length);
         g_boxes[action.frame_nr].splice(insertAt, 0, action.box);
+        if (action.keyFrameDropped)
+            addKeyFrame(action.frame_nr);
     } else if (action.type === 'removeMany') {
         // Put back in reverse removal order so each index is valid again.
         for (var r = action.removed.length - 1; r >= 0; r--) {
@@ -396,7 +430,6 @@ function rebuildLabelDropdown() {
     var select = document.getElementById('usedLabelsSelect');
     if (!select) return;
     var currentValue = select.value;
-    var hadOptions = select.options.length > 0;
     var labels = getUsedLabels();
 
     select.innerHTML = '';
@@ -409,10 +442,10 @@ function rebuildLabelDropdown() {
 
     if (labels.indexOf(currentValue) !== -1) {
         select.value = currentValue;
-    } else if (currentValue !== '' || hadOptions) {
-        // The selected label is gone (e.g. all its boxes were deleted): select
-        // nothing rather than silently the first label, so a second click on
-        // Delete boxes cannot delete another label.
+    } else {
+        // Nothing chosen yet, or the selected label is gone (e.g. all its
+        // boxes were deleted): select nothing rather than silently the first
+        // label, so Delete boxes cannot delete a label nobody picked.
         var blank = document.createElement('option');
         blank.value = '';
         blank.textContent = '';
@@ -592,12 +625,8 @@ function deleteSelectedLabel() {
             else
                 i++;
         }
-        // A frame left without boxes is no longer annotated; else saving
-        // would store it as an annotated frame with no boxes.
-        if (before > 0 && boxes.length === 0 && g_targetFrames.indexOf(n) !== -1) {
-            removeKeyFrame(n);
+        if (before > 0 && dropKeyFrameIfEmpty(n))
             keyFrames.push(n);
-        }
     }
     var range = r.text;
     if (removed.length === 0) {
@@ -613,10 +642,19 @@ function deleteSelectedLabel() {
         range + '. Ctrl+Z undoes.');
 }
 
-// Nested suggestions show their parent's current name (proposals.js), so
-// they follow when an accepted parent box is renamed, deleted or restored.
+// After boxes change (deleted, drawn, moved, renamed, restored): suggestions
+// under a box are hidden and those whose box is gone come back, and nested
+// suggestions follow their parent's current name (proposals.js).
 function refreshSuggestionNames() {
-    if (typeof refreshChildNames === 'function') refreshChildNames();
+    if (!suggestionsLoaded()) return;
+    syncCoveredProposals();
+    refreshChildNames();
+}
+
+// proposals.js may fail to load (e.g. a missing file after an update); the box
+// tool keeps working without suggestions.
+function suggestionsLoaded() {
+    return typeof drawProposals === 'function' && typeof syncCoveredProposals === 'function';
 }
 
 // Shows a short message that fades out by itself, so nothing has to be
@@ -637,9 +675,12 @@ function recordDragUndo() {
     if (!s) return;
     var b = s.box;
     if (b.x === s.x && b.y === s.y && b.width === s.width && b.height === s.height) return;
+    g_annotationHasChanged = true;      // else leaving the image would not ask to save
     g_undoStack.push({type: 'custom', undo: function() {
         b.x = s.x; b.y = s.y; b.width = s.width; b.height = s.height;
     }});
+    refreshSuggestionNames();
+    redrawSequence();
 }
 
 function clamp(v, lo, hi) {
@@ -696,8 +737,9 @@ function addBox(frame_nr, x, y, x2, y2, label, color, recordUndo, updateDropdown
         // Boxes hydrated from the server on page load are not undoable user
         // actions - recording them here would let Ctrl+Z silently delete
         // already-saved boxes instead of just the most recent new one.
+        var newKeyFrame = g_targetFrames.indexOf(frame_nr) === -1;
         if (recordUndo)
-            g_undoStack.push({type: 'add', frame_nr: frame_nr, box: box});
+            g_undoStack.push({type: 'add', frame_nr: frame_nr, box: box, newKeyFrame: newKeyFrame});
         addKeyFrame(frame_nr);
         if (redraw)
             redrawSequence();
@@ -731,7 +773,8 @@ function redraw() {
         g_context.stroke();
     }
 
-    drawProposals();
+    if (suggestionsLoaded())
+        drawProposals();
 
     if (!(g_currentFrameNr in g_boxes)) return;
 
@@ -807,10 +850,12 @@ function copyBoxesToFrame(boxes, targetFrameNr) {
             b.y + b.height,
             b.label,
             b.color,  // preserve color
-            true, false
+            true, false, false
         );
     }
     rebuildLabelDropdown();
+    refreshSuggestionNames();
+    redrawSequence();
 }
 
 function copyToNext() {
@@ -881,7 +926,7 @@ function loadBBTask(image_sequence_id) {
         for (var i = 0; i < g_hydrationBoxes.length; i++) {
             var b = g_hydrationBoxes[i];
             try {
-                addBox(b.frame_nr, b.x, b.y, b.x + b.width, b.y + b.height, b.label, undefined, false, false);
+                addBox(b.frame_nr, b.x, b.y, b.x + b.width, b.y + b.height, b.label, undefined, false, false, false);
             } catch (e) {}
         }
         g_hydrationBoxes = [];
@@ -899,13 +944,19 @@ function loadBBTask(image_sequence_id) {
     };
 }
 
+// Boxes accepted from a suggestion carry in-memory links (src, acceptGroup,
+// coveredSrc; acceptGroup even points back to the box). They are not saved.
+function boxSaveFields(key, value) {
+    return key === 'src' || key === 'acceptGroup' || key === 'coveredSrc' ? undefined : value;
+}
+
 function sendDataForSave() {
     return $.ajax({
         type: 'POST',
         url: '/bronchoscopy-bounding-box/save/',
         data: {
             image_id: g_imageID,
-            boxes: JSON.stringify(g_boxes),
+            boxes: JSON.stringify(g_boxes, boxSaveFields),
             task_id: g_taskID,
             target_frames: JSON.stringify(g_targetFrames),
             quality: $('input[name=quality]:checked').val(),

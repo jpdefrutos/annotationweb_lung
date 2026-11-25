@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import secrets
+import time
 from django.conf import settings
 from django.contrib.staticfiles import finders
 from django.db import transaction
@@ -15,6 +16,7 @@ from common.task import setup_task_context, save_annotation, NoMoreImages
 from common.label import get_or_create_task_label
 from .models import BronchoscopyBoundingBox
 from . import lumen
+from common import metaimage
 
 logger = logging.getLogger(__name__)
 from subsequence_classification.models import SubsequenceLabel
@@ -115,15 +117,21 @@ _lumen_code_hash = None
 
 
 def _lumen_code_version():
-    """Hash of lumen.py, so cached suggestions are recomputed after a code change."""
+    """
+    Hash of the code the results come from (lumen.py and the frame reader
+    common/metaimage.py), so cached suggestions are recomputed after a change.
+    """
     global _lumen_code_hash
     if _lumen_code_hash is None:
-        with open(lumen.__file__.replace('.pyc', '.py'), 'rb') as f:
-            _lumen_code_hash = hashlib.sha1(f.read()).hexdigest()[:12]
+        h = hashlib.sha1()
+        for module in (lumen, metaimage):
+            with open(module.__file__.replace('.pyc', '.py'), 'rb') as f:
+                h.update(f.read())
+        _lumen_code_hash = h.hexdigest()[:12]
     return _lumen_code_hash
 
 
-def _proposal_cache_path(sequence, params, start, end, state):
+def _proposal_cache_path(sequence, frames, params, start, end, state):
     """
     The browser loads the suggestions for the whole video in chunks every time
     the page opens, so each chunk's response is kept on disk. The key covers
@@ -131,30 +139,84 @@ def _proposal_cache_path(sequence, params, start, end, state):
     params, the frames and the tracker state the chunk continues from (which,
     for chunks after the first, is the state from the previous cached chunk).
     """
+    # The file times and sizes of every frame the result depends on, so
+    # replaced frames are computed again: the chunk, the frames read past it
+    # (short-track filtering) and the samples the scope area comes from.
+    ahead = end + lumen.lookahead_frames(params)
+    files = lumen.files_signature([frames[f] for f in range(start, ahead + 1) if f in frames] +
+                                  lumen.scope_sample_paths(frames))
     key = json.dumps({'code': _lumen_code_version(), 'params': dataclasses.asdict(params),
-                      'start': start, 'end': end, 'state': state}, sort_keys=True)
+                      'start': start, 'end': end, 'state': state, 'files': files,
+                      'nr_frames': len(frames)}, sort_keys=True)
     name = hashlib.sha1(key.encode('utf-8')).hexdigest()
     return os.path.join(_lumen_cache_dir(), lumen.cache_key_for(sequence) + '_rows', name + '.json')
+
+
+# Stored suggestions not used for this long are deleted (every settings change
+# or forced reload writes a new set, which is otherwise never read again).
+PROPOSAL_CACHE_MAX_AGE = 30 * 24 * 3600
+_last_prune = 0.0
 
 
 def _read_cached(path):
     try:
         with open(path, encoding='utf-8') as f:
             data = json.load(f)
-        return data if isinstance(data, dict) and 'rows' in data else None
     except (OSError, ValueError):
         return None                 # missing or damaged: compute again
+    if not (isinstance(data, dict) and 'rows' in data):
+        return None
+    try:
+        os.utime(path)              # in use: not pruned
+    except OSError:
+        pass
+    return data
+
+
+def _prune_cache():
+    """Deletes stored suggestions and scope areas unused for PROPOSAL_CACHE_MAX_AGE (at most every 6 h)."""
+    global _last_prune
+    now = time.time()
+    if now - _last_prune < 6 * 3600:
+        return
+    _last_prune = now
+    root = _lumen_cache_dir()
+    try:
+        entries = os.listdir(root)
+    except OSError:
+        return
+    # chunk files in <video>_rows/, and the scope-area files (a new one is
+    # written whenever a video's frames change)
+    # (and temporary files a killed process may have left)
+    paths = [os.path.join(root, d) for d in entries if d.endswith(('_scope.npz', '.tmp.npz'))]
+    for d in entries:
+        if d.endswith('_rows'):
+            try:
+                paths += [os.path.join(root, d, n) for n in os.listdir(os.path.join(root, d))]
+            except OSError:
+                pass
+    for path in paths:
+        try:
+            if now - os.stat(path).st_mtime > PROPOSAL_CACHE_MAX_AGE:
+                os.remove(path)
+        except OSError:
+            pass
 
 
 def _write_cached(path, data):
+    tmp = '%s.%s.tmp' % (path, secrets.token_hex(4))
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        tmp = '%s.%s.tmp' % (path, secrets.token_hex(4))
         with open(tmp, 'w', encoding='utf-8') as f:
             json.dump(data, f)
         os.replace(tmp, path)       # atomic: no half-written file
     except OSError:
         logger.warning('Could not cache box suggestions in %s', path, exc_info=True)
+        try:
+            os.remove(tmp)          # e.g. disk full: no half-written leftovers
+        except OSError:
+            pass
+    _prune_cache()
 
 
 @require_POST
@@ -191,14 +253,17 @@ def propose_boxes(request):
 
     try:
         frames = lumen.sequence_frames(sequence)
+        if not frames:
+            raise lumen.LumenError('This video has no frames')
         first, last = min(frames), max(frames)
         if not first <= start <= last:
             raise lumen.LumenError('Frame %d is outside the video (%d-%d)' % (start, first, last))
         count = max(1, min(count, MAX_PROPOSAL_FRAMES))
         end = min(start + count - 1, last)
 
-        cache_path = _proposal_cache_path(sequence, params, start, end, state)
-        cached = _read_cached(cache_path)
+        cache_path = _proposal_cache_path(sequence, frames, params, start, end, state)
+        # refresh: Reload suggestions with unchanged settings computes again
+        cached = None if request.POST.get('refresh') else _read_cached(cache_path)
         if cached is not None:
             return JsonResponse(dict(cached, success=True, cached=True))
 
@@ -216,6 +281,11 @@ def propose_boxes(request):
                              'message': 'Box suggestions failed: %s: %s' % (type(e).__name__, e)},
                             status=500)
 
-    data = {'rows': rows, 'state': runner.state(), 'frames': [start, end], 'dropped': runner.dropped}
+    data = {'rows': rows, 'state': runner.state(), 'frames': [start, end], 'dropped': runner.dropped,
+            'skipped': runner.skipped, 'skip_message': runner.skip_message}
+    # Kept even with skipped frames: otherwise one permanently bad frame in the
+    # first chunk would give a new run (and new keys) on every open, so the
+    # whole video would be computed again each time. Reload suggestions with
+    # unchanged settings computes again if the frame has been fixed.
     _write_cached(cache_path, data)
     return JsonResponse(dict(data, success=True))

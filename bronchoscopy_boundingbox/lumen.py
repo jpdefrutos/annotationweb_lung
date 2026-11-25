@@ -19,6 +19,7 @@ box_id is only unique within one run; identify a track by (run_id, box_id).
 """
 
 import hashlib
+import logging
 import os
 import secrets
 import time
@@ -29,6 +30,8 @@ from scipy import ndimage
 from scipy.optimize import linear_sum_assignment
 
 from common.metaimage import MetaImage
+
+logger = logging.getLogger(__name__)
 
 L1_COLOR, L2_COLOR = "#ff9900", "#30e0e0"
 
@@ -86,8 +89,8 @@ PARAM_LIMITS = {
     "child_max": (float, 0.0, 1.0),
     "min_children": (int, 1, 20),
     "track": (bool, None, None),
-    "track_iou": (float, 0.0, 1.0),
-    "track_iou2": (float, 0.0, 1.0),
+    "track_iou": (float, 0.05, 1.0),    # 0 would link boxes that do not overlap at all
+    "track_iou2": (float, 0.05, 1.0),
     "handoff": (bool, None, None),
     "track_cover": (float, 0.0, 1.0),
     # max_lost and min_track_len together set the look-ahead past each chunk,
@@ -126,10 +129,14 @@ def read_mhd(path):
         image = MetaImage(filename=path)
     except Exception as e:      # MetaImage raises plain Exception and parse errors
         raise LumenError(f"Could not read {name}: {e}")
-    etype = image.get_attribute("ElementType")
+    # a header without ElementType gives a KeyError: still a bad frame to skip
+    etype = image.attributes.get("ElementType")
     if etype != "MET_UCHAR":
         raise LumenError(f"{name}: unsupported pixel type {etype} (only 8-bit frames)")
-    img = image.get_pixel_data()
+    try:
+        img = image.get_pixel_data()
+    except Exception as e:
+        raise LumenError(f"Could not read {name}: {e}")
     return img if img.ndim == 3 else img[..., None]
 
 
@@ -200,14 +207,17 @@ def detect_roi(img):
     return {"top": top, "bottom": bottom, "left": left, "right": right}
 
 
-def estimate_roi(frame_paths, n_samples=10):
-    """Conservative percentiles of detect_roi over a few frames (preview_boxes.py)."""
+def estimate_roi(frame_paths, n_samples=10, images=None):
+    """
+    Conservative percentiles of detect_roi over a few frames (preview_boxes.py).
+    images: the frames already read (same order as frame_paths), to read them once.
+    """
     idx = np.linspace(0, len(frame_paths) - 1,
                       min(n_samples, len(frame_paths)), dtype=int)
     rois = []
     for i in idx:
         try:
-            r = detect_roi(read_mhd(frame_paths[i]))
+            r = detect_roi(images[i] if images is not None else read_mhd(frame_paths[i]))
         except Exception:
             r = None
         if r:
@@ -222,14 +232,14 @@ def estimate_roi(frame_paths, n_samples=10):
     }
 
 
-def _scope_raw(paths, roi, black=15):
+def _scope_raw(paths, roi, black=15, images=None):
     """
     Pixels inside the octagonal scope image, before erosion: bright in at least
     one sampled frame (the scope moves, so every image point is bright sometime).
     """
     acc = None
-    for p in paths:
-        g = crop(read_mhd(p), roi).mean(axis=2) > black
+    for i, p in enumerate(paths):
+        g = crop(images[i] if images is not None else read_mhd(p), roi).mean(axis=2) > black
         acc = g if acc is None else (acc | g)
     lab, n = ndimage.label(acc)
     if n > 1:                                   # keep the largest region only
@@ -245,11 +255,11 @@ def roi_and_mask(frames, cache_dir, cache_key, erode=5):
     N_SAMPLES frames spread over the whole video and cached as
     <cache_dir>/<cache_key>_scope.npz.
     """
-    nrs = sorted(frames)
-    idx = np.linspace(0, len(nrs) - 1, min(N_SAMPLES, len(nrs)), dtype=int)
-    paths = [frames[nrs[i]] for i in idx]
+    paths = scope_sample_paths(frames)
 
-    cache = os.path.join(cache_dir, f"{cache_key}_scope.npz")
+    # The file times and sizes are part of the name, so replaced frames (e.g.
+    # re-exported under the same names) get a new estimate.
+    cache = os.path.join(cache_dir, f"{cache_key}_{files_signature(paths)}_scope.npz")
     roi = raw = None
     if os.path.isfile(cache):
         try:
@@ -257,23 +267,100 @@ def roi_and_mask(frames, cache_dir, cache_key, erode=5):
                 roi = dict(zip(("left", "right", "top", "bottom"),
                                (int(v) for v in z["roi"])))
                 raw = z["mask"]
+            try:
+                os.utime(cache)                 # in use: not pruned (views._prune_cache)
+            except OSError:
+                pass
         except Exception:               # damaged file: estimate again below
             roi = raw = None
     if raw is None:
-        missing = [p for p in paths if not os.path.isfile(p)]
-        if missing:
-            raise LumenError(f"Frame file not found: {missing[0]}")
-        roi = estimate_roi(paths, n_samples=len(paths))
+        paths, images = _readable_samples(paths)      # each sample read once
+        roi = estimate_roi(paths, n_samples=len(paths), images=images)
         if roi is None:
             raise LumenError("Could not find the scope image (ROI) in this video")
-        raw = _scope_raw(paths, roi)
-        os.makedirs(cache_dir, exist_ok=True)
+        raw = _scope_raw(paths, roi, images=images)
         tmp = f"{cache}.{secrets.token_hex(4)}.tmp.npz"
-        np.savez_compressed(tmp, mask=raw, roi=np.array(
-            [roi["left"], roi["right"], roi["top"], roi["bottom"]]))
-        os.replace(tmp, cache)                  # atomic: no half-written cache
+        try:
+            os.makedirs(cache_dir, exist_ok=True)
+            np.savez_compressed(tmp, mask=raw, roi=np.array(
+                [roi["left"], roi["right"], roi["top"], roi["bottom"]]))
+            os.replace(tmp, cache)              # atomic: no half-written cache
+        except OSError:
+            # only a speed-up: carry on without it (e.g. no write access)
+            logger.warning("Could not cache the scope area in %s", cache, exc_info=True)
+            try:
+                os.remove(tmp)                  # e.g. disk full: no half-written leftovers
+            except OSError:
+                pass
     mask = ndimage.binary_erosion(raw, iterations=erode) if erode > 0 else raw
     return roi, mask
+
+
+def scope_sample_paths(frames):
+    """The N_SAMPLES frames, spread over the video, the scope area is estimated from."""
+    nrs = sorted(frames)
+    idx = np.linspace(0, len(nrs) - 1, min(N_SAMPLES, len(nrs)), dtype=int)
+    return [frames[nrs[i]] for i in idx]
+
+
+def lookahead_frames(params):
+    """How many frames past a chunk Runner.process reads (see there)."""
+    if not (params.track and params.min_track_len > 1):
+        return 0
+    return (params.min_track_len - 1) * (params.max_lost + 1)
+
+
+def _readable_samples(paths):
+    """
+    (paths, images) of the sample frames that can be read and have the video's
+    usual size, so one damaged frame among the samples does not stop the
+    whole video.
+    """
+    read = {}
+    for p in paths:
+        try:
+            read[p] = read_mhd(p)
+        except LumenError:
+            continue
+    if not read:
+        raise LumenError(f"None of the sampled frames could be read (e.g. {paths[0]})")
+    shapes = [img.shape for img in read.values()]
+    usual = max(set(shapes), key=shapes.count)
+    keep = [p for p in paths if p in read and read[p].shape == usual]
+    return keep, [read[p] for p in keep]
+
+
+def _data_file(mhd_path):
+    """The pixel-data file an .mhd header names, or None."""
+    try:
+        with open(mhd_path, encoding="latin-1") as f:
+            for line in f:
+                key, _, value = line.partition("=")
+                if key.strip() == "ElementDataFile":
+                    value = value.strip()
+                    return None if value == "LOCAL" else os.path.join(os.path.dirname(mhd_path), value)
+    except OSError:
+        pass
+    return None
+
+
+def files_signature(paths):
+    """
+    Short hash of the files' modification times and sizes: each .mhd header
+    and the pixel-data file it names (ElementDataFile), as a re-export may
+    replace only the data.
+    """
+    h = hashlib.sha1()
+    for p in paths:
+        for q in (p, _data_file(p)):
+            if q is None:
+                continue
+            try:
+                st = os.stat(q)
+                h.update(f"{q}|{st.st_mtime_ns}|{st.st_size};".encode("utf-8"))
+            except OSError:
+                h.update(f"{q}|-;".encode("utf-8"))
+    return h.hexdigest()[:10]
 
 
 def cache_key_for(image_sequence):
@@ -548,6 +635,8 @@ class Runner:
     def __init__(self, frames, roi, mask, params, state=None):
         self.frames, self.roi, self.mask, self.p = frames, roi, mask, params
         self.dropped = 0        # boxes dropped by min_track_len in the last process()
+        self.skipped = []       # unreadable frames in the last process()
+        self.skip_message = None    # why the first of them could not be read
         try:
             self._load(state if self._compatible(state, params) else None)
         except (KeyError, TypeError, ValueError, AttributeError):
@@ -671,6 +760,8 @@ class Runner:
         frame_nrs = list(frame_nrs)
         p = self.p
         self.dropped = 0
+        self.skipped = []
+        self.skip_message = None
         if not frame_nrs:
             return []
         filtering = p.track and p.min_track_len > 1
@@ -680,16 +771,24 @@ class Runner:
         before = ({tid: d["n"] for t in self.trackers.values() for tid, d in t.tracks.items()}
                   if filtering and continues else {})
 
+        # An unreadable frame is skipped instead of failing the whole chunk
+        # (the browser loads the whole video chunk by chunk, and one bad frame
+        # would stop it). The tracks start again after it (frame() never links
+        # across a gap).
         rows = []
         for f in frame_nrs:
-            rows += self.frame(f)
+            try:
+                rows += self.frame(f)
+            except LumenError as e:
+                self.skipped.append(f)
+                self.skip_message = self.skip_message or str(e)
         if not filtering:
             return rows
 
         snapshot = self.state()
         ahead = []
         f = frame_nrs[-1]
-        for _ in range((p.min_track_len - 1) * (p.max_lost + 1)):
+        for _ in range(lookahead_frames(p)):
             f += 1
             if f not in self.frames:
                 break                     # end of the video
