@@ -117,6 +117,10 @@ function setupSegmentation() {
         g_hoverX = pos.x;
         g_hoverY = pos.y;
         applyDragMove(pos);
+        if (g_paint || g_move || g_resize)
+            hideProposalHover();
+        else
+            updateProposalHover(e, pos.x, pos.y);
     });
 
     $('#canvas').mouseup(function(e) {
@@ -126,6 +130,7 @@ function setupSegmentation() {
     $('#canvas').mouseleave(function(e) {
         g_hoverX = null;
         g_hoverY = null;
+        hideProposalHover();
     });
 
     // The handlers above only fire while the cursor is over the canvas, so

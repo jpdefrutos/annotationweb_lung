@@ -1,6 +1,9 @@
+import dataclasses
+import hashlib
 import json
 import logging
 import os
+import secrets
 from django.conf import settings
 from django.contrib.staticfiles import finders
 from django.db import transaction
@@ -108,6 +111,52 @@ def _lumen_cache_dir():
                    os.path.join(settings.BASE_DIR, 'lumen_cache'))
 
 
+_lumen_code_hash = None
+
+
+def _lumen_code_version():
+    """Hash of lumen.py, so cached suggestions are recomputed after a code change."""
+    global _lumen_code_hash
+    if _lumen_code_hash is None:
+        with open(lumen.__file__.replace('.pyc', '.py'), 'rb') as f:
+            _lumen_code_hash = hashlib.sha1(f.read()).hexdigest()[:12]
+    return _lumen_code_hash
+
+
+def _proposal_cache_path(sequence, params, start, end, state):
+    """
+    The browser loads the suggestions for the whole video in chunks every time
+    the page opens, so each chunk's response is kept on disk. The key covers
+    everything the result depends on: the video's files, the lumen code, the
+    params, the frames and the tracker state the chunk continues from (which,
+    for chunks after the first, is the state from the previous cached chunk).
+    """
+    key = json.dumps({'code': _lumen_code_version(), 'params': dataclasses.asdict(params),
+                      'start': start, 'end': end, 'state': state}, sort_keys=True)
+    name = hashlib.sha1(key.encode('utf-8')).hexdigest()
+    return os.path.join(_lumen_cache_dir(), lumen.cache_key_for(sequence) + '_rows', name + '.json')
+
+
+def _read_cached(path):
+    try:
+        with open(path, encoding='utf-8') as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) and 'rows' in data else None
+    except (OSError, ValueError):
+        return None                 # missing or damaged: compute again
+
+
+def _write_cached(path, data):
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = '%s.%s.tmp' % (path, secrets.token_hex(4))
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(data, f)
+        os.replace(tmp, path)       # atomic: no half-written file
+    except OSError:
+        logger.warning('Could not cache box suggestions in %s', path, exc_info=True)
+
+
 @require_POST
 def propose_boxes(request):
     """
@@ -148,6 +197,11 @@ def propose_boxes(request):
         count = max(1, min(count, MAX_PROPOSAL_FRAMES))
         end = min(start + count - 1, last)
 
+        cache_path = _proposal_cache_path(sequence, params, start, end, state)
+        cached = _read_cached(cache_path)
+        if cached is not None:
+            return JsonResponse(dict(cached, success=True, cached=True))
+
         roi, mask = lumen.roi_and_mask(frames, _lumen_cache_dir(),
                                        lumen.cache_key_for(sequence), params.erode)
         runner = lumen.Runner(frames, roi, mask, params, state)
@@ -162,5 +216,6 @@ def propose_boxes(request):
                              'message': 'Box suggestions failed: %s: %s' % (type(e).__name__, e)},
                             status=500)
 
-    return JsonResponse({'success': True, 'rows': rows, 'state': runner.state(),
-                         'frames': [start, end], 'dropped': runner.dropped})
+    data = {'rows': rows, 'state': runner.state(), 'frames': [start, end], 'dropped': runner.dropped}
+    _write_cached(cache_path, data)
+    return JsonResponse(dict(data, success=True))

@@ -1,6 +1,7 @@
 import json
 import os
 import shutil
+from unittest import mock
 import tempfile
 import zlib
 
@@ -68,6 +69,11 @@ class SyntheticVideoTestCase(TestCase):
         super().tearDownClass()
 
     def setUp(self):
+        # Each test computes its suggestions (the scope-area cache may stay)
+        if os.path.isdir(self.cache_dir):
+            for name in os.listdir(self.cache_dir):
+                if name.endswith('_rows'):
+                    shutil.rmtree(os.path.join(self.cache_dir, name))
         dataset = Dataset.objects.create(name='d')
         subject = Subject.objects.create(name='s', dataset=dataset)
         self.sequence = ImageSequence.objects.create(
@@ -427,7 +433,41 @@ class DamagedScopeCacheTests(SyntheticVideoTestCase):
         path = os.path.join(self.cache_dir, caches[0])
         with open(path, 'wb') as f:
             f.write(b'not an npz file')
-        r = self._propose(0, 1)
+        r = self._propose(0, 2)      # not the cached chunk: the scope area is needed
         self.assertEqual(r.status_code, 200, r.content)
         with np.load(path) as z:
             self.assertIn('roi', z.files)
+
+
+class ProposalCacheTests(SyntheticVideoTestCase):
+    """Suggestion chunks are kept on disk, so opening a video again is fast."""
+
+    def test_same_request_is_served_from_the_cache(self):
+        r1 = self._propose(0, 5).json()
+        self.assertNotIn('cached', r1)
+        with mock.patch.object(lumen, 'detect', side_effect=AssertionError('not cached')):
+            r2 = self._propose(0, 5).json()
+            self.assertTrue(r2.get('cached'), r2)
+            self.assertEqual(r2['rows'], r1['rows'])            # same run_id too
+            self.assertEqual(r2['state'], r1['state'])
+            # the next chunk, continuing from that state, is computed once ...
+        r3 = self._propose(5, 5, state=r1['state']).json()
+        self.assertNotIn('cached', r3)
+        with mock.patch.object(lumen, 'detect', side_effect=AssertionError('not cached')):
+            r4 = self._propose(5, 5, state=r2['state']).json()   # ... then cached
+        self.assertEqual(r4['rows'], r3['rows'])
+
+    def test_other_params_or_frames_are_computed(self):
+        self._propose(0, 5)
+        self.assertNotIn('cached', self._propose(0, 4).json())
+        self.assertNotIn('cached', self._propose(0, 5, params={'levels': 2}).json())
+
+    def test_damaged_cache_file_is_computed_again(self):
+        self._propose(0, 5)
+        folder = [d for d in os.listdir(self.cache_dir) if d.endswith('_rows')][0]
+        for name in os.listdir(os.path.join(self.cache_dir, folder)):
+            with open(os.path.join(self.cache_dir, folder, name), 'w') as f:
+                f.write('{broken')
+        r = self._propose(0, 5)
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertNotIn('cached', r.json())

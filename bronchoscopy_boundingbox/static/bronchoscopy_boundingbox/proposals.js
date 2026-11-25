@@ -13,7 +13,7 @@ var g_imageSequenceID = null;
 var g_proposals = {};          // frame_nr -> [proposal]
 var g_proposalState = null;    // tracker state from the last response, sent back with the next chunk
 var g_selectedProposal = null;
-var g_proposalBusy = false;
+var g_proposalsVisible = true;  // Show suggestions switch; hiding never deletes them
 var g_overlapHideIou = 0.5;    // hide a suggestion that overlaps an accepted box this much
 var g_trackLetters = {};       // track key -> letter, so a track keeps its letter over frames
 var g_letterCounters = {};     // counter key -> how many letters handed out
@@ -52,80 +52,91 @@ function setProposalStatus(text, isError) {
     $('#proposalStatus').text(text).css('color', isError ? '#ff6060' : '');
 }
 
-function requestProposals(startFrame) {
-    if (g_proposalBusy || g_imageSequenceID === null) return;
-    var count = parseInt($('#propCount').val(), 10) || 60;
-    // Only frames this task shows (a task may load only part of the video)
-    count = Math.max(1, Math.min(count, g_startFrame + g_sequenceLength - startFrame + 1));
-    g_proposalBusy = true;
-    $('#proposeButton').prop('disabled', true);
-    setProposalStatus('Finding boxes in frames ' + startFrame + '–' + (startFrame + count - 1) +
-        '… (first run on a video also estimates the scope area)');
+// Suggestions for all frames the task shows are loaded in the background when
+// the page opens, chunk by chunk from the first frame, so the tracks continue
+// over the whole video. They appear as each chunk arrives. The server keeps
+// the results, so opening the video again is fast. A new load (Reload
+// suggestions) replaces the unaccepted suggestions and stops an older load.
+var PROPOSAL_CHUNK = 100;
+var g_proposalLoad = 0;         // id of the current load; older responses are ignored
 
-    $.ajax({
-        type: 'POST',
-        url: '/bronchoscopy-bounding-box/propose/',
-        data: {
-            task_id: g_taskID,
-            image_sequence_id: g_imageSequenceID,
-            start: startFrame,
-            count: count,
-            params: JSON.stringify(proposalParams()),
-            state: g_proposalState ? JSON.stringify(g_proposalState) : '',
-        },
-        dataType: 'json'
-    }).done(function(data) {
-        if (!data.success) {
-            setProposalStatus(data.message || 'Suggestion failed', true);
-            return;
-        }
-        // The server keeps the run (and its IDs) but restarts all tracks
-        // unless this chunk starts right after the previous one.
-        var continued = !!g_proposalState && data.state.run_id === g_proposalState.run_id &&
-            g_proposalState.prev !== null && data.frames[0] === g_proposalState.prev + 1;
-        var first = data.frames[0], last = data.frames[1];
-        var prevState = g_proposalState, saved = {};
-        for (var f = first; f <= last; f++)
-            if (g_proposals[f]) saved[f] = g_proposals[f];
-        g_proposalState = data.state;
-        var hidden = storeProposals(data.rows, first, last);
-        // Ctrl+Z puts back the suggestions these frames had before (if any)
-        // and the tracker state, so tracks continue as they did.
-        g_undoStack.push({type: 'custom', undo: function() {
-            if (g_selectedProposal && g_selectedProposal.frame_nr >= first &&
-                    g_selectedProposal.frame_nr <= last)
-                selectProposal(null);
-            for (var u = first; u <= last; u++) {
-                if (saved[u]) g_proposals[u] = saved[u];
-                else delete g_proposals[u];
-            }
-            g_proposalState = prevState;
-            refreshChildNames();
-            setProposalStatus('Undid the suggestions for frames ' + first + '–' + last + '.');
-        }});
-        var auto = continued ? autoAcceptContinuedTracks(first, last) : {boxes: 0, tracks: 0};
-        var n = data.rows.length - hidden - auto.boxes;
-        setProposalStatus(n + ' suggestion' + (n === 1 ? '' : 's') + ' in frames ' +
-            data.frames[0] + '–' + data.frames[1] +
-            (continued ? ' (tracks continued)' :
-                ' (new tracks' + (prevState && data.state.run_id === prevState.run_id ?
-                    ': not right after the previous suggestions' : '') + ')') + '.' +
-            (auto.boxes ? ' ' + auto.boxes + ' box(es) continuing ' + auto.tracks +
-                ' accepted track(s) were accepted automatically (Ctrl+Z undoes).' : '') +
-            (data.dropped ? ' ' + data.dropped + ' box(es) on short tracks were left out.' : '') +
-            (hidden ? ' ' + hidden + ' hidden because they overlap a box you already have.' : ''));
-        if (startFrame !== g_currentFrameNr)
-            goToCopiedFrame(startFrame);
-        else
+function loadAllProposals() {
+    if (g_imageSequenceID === null) return;
+    var load = ++g_proposalLoad;
+    var first = g_startFrame, last = g_startFrame + g_sequenceLength;
+    var totals = {rows: 0, auto: 0, autoTracks: 0, dropped: 0, hidden: 0};
+    g_proposals = {};
+    g_proposalState = null;
+    selectProposal(null);
+    var params = JSON.stringify(proposalParams());
+    var started = Date.now();
+
+    function step(start) {
+        if (load !== g_proposalLoad) return;
+        var count = Math.min(PROPOSAL_CHUNK, last - start + 1);
+        setProposalStatus('Finding suggestions for the whole video: frames ' + first + '–' +
+            (start - 1) + ' of ' + first + '–' + last + ' done (' +
+            Math.round(100 * (start - first) / (last - first + 1)) + '%)…' +
+            (start === first ? ' The first time a video is opened this takes a few minutes.' : ''));
+        $.ajax({
+            type: 'POST',
+            url: '/bronchoscopy-bounding-box/propose/',
+            data: {
+                task_id: g_taskID,
+                image_sequence_id: g_imageSequenceID,
+                start: start,
+                count: count,
+                params: params,
+                state: g_proposalState ? JSON.stringify(g_proposalState) : '',
+            },
+            dataType: 'json'
+        }).done(function(data) {
+            if (load !== g_proposalLoad) return;
+            if (!data.success) { loadFailed(data.message || 'Suggestion failed'); return; }
+            var r = storeProposalChunk(data);
+            totals.rows += r.shown; totals.auto += r.auto.boxes; totals.autoTracks += r.auto.tracks;
+            totals.dropped += data.dropped || 0; totals.hidden += r.hidden;
+            if (r.auto.boxes)
+                showProposalNotice(r.auto.boxes + ' box(es) continuing ' + r.auto.tracks +
+                    ' accepted track(s) in frames ' + data.frames[0] + '–' + data.frames[1] +
+                    ' were accepted automatically. Ctrl+Z undoes.', true);
+            if (g_selectedProposal) showSelectedProposalInfo();
             redrawSequence();
-    }).fail(function(xhr) {
-        var msg = xhr.responseJSON && xhr.responseJSON.message
-            ? xhr.responseJSON.message : 'Suggestion failed (' + xhr.status + ')';
-        setProposalStatus(msg, true);
-    }).always(function() {
-        g_proposalBusy = false;
-        $('#proposeButton').prop('disabled', false);
-    });
+            if (data.frames[1] < last) step(data.frames[1] + 1);
+            else loadDone();
+        }).fail(function(xhr) {
+            if (load !== g_proposalLoad) return;
+            loadFailed(xhr.responseJSON && xhr.responseJSON.message
+                ? xhr.responseJSON.message : 'Suggestion failed (' + xhr.status + ')');
+        });
+    }
+
+    function loadFailed(msg) {
+        setProposalStatus(msg + ' Press Reload suggestions to try again.', true);
+    }
+
+    function loadDone() {
+        setProposalStatus(totals.rows + ' suggestion' + (totals.rows === 1 ? '' : 's') +
+            ' in frames ' + first + '–' + last + '.' +
+            (totals.auto ? ' ' + totals.auto + ' box(es) continuing accepted tracks were accepted automatically.' : '') +
+            (totals.dropped ? ' ' + totals.dropped + ' box(es) on short tracks were left out.' : '') +
+            (totals.hidden ? ' ' + totals.hidden + ' hidden because they overlap a box you already have.' : ''));
+    }
+
+    step(first);
+}
+
+// Stores one chunk. When the chunk continues the previous one (the normal
+// case), tracks accepted just before it go on being accepted (see
+// autoAcceptContinuedTracks).
+function storeProposalChunk(data) {
+    var first = data.frames[0], last = data.frames[1];
+    var continued = !!g_proposalState && data.state.run_id === g_proposalState.run_id &&
+        g_proposalState.prev !== null && first === g_proposalState.prev + 1;
+    g_proposalState = data.state;
+    var hidden = storeProposals(data.rows, first, last);
+    var auto = continued ? autoAcceptContinuedTracks(first, last) : {boxes: 0, tracks: 0};
+    return {shown: data.rows.length - hidden - auto.boxes, hidden: hidden, auto: auto};
 }
 
 // Names already given to tracks, from frames before firstFrame: the name on
@@ -378,6 +389,7 @@ function trackProposals(p, fromFrame) {
 // The smallest suggestion under (x, y) on the current frame, so a nested
 // (level-2) box can be picked even though it lies inside its parent.
 function proposalAt(x, y) {
+    if (!g_proposalsVisible) return null;
     var list = g_proposals[g_currentFrameNr];
     if (!list) return null;
     var best = null;
@@ -682,21 +694,49 @@ function proposalUnderCursor(x, y, inside) {
     return p.width * p.height < box.width * box.height ? p : null;
 }
 
-function clearProposals() {
-    var n = 0;
-    for (var f in g_proposals) n += g_proposals[f].length;
-    if (n === 0) return;
-    var saved = g_proposals, savedState = g_proposalState;
-    g_proposals = {};
-    g_proposalState = null;     // the next run starts fresh
-    selectProposal(null);
-    g_undoStack.push({type: 'custom', undo: function() {
-        g_proposals = saved;
-        g_proposalState = savedState;
-        refreshChildNames();
-        setProposalStatus('Undid Clear suggestions: ' + n + ' suggestion(s) are back.');
-    }});
-    setProposalStatus('Removed ' + n + ' unaccepted suggestion(s); accepted boxes are kept. Ctrl+Z undoes.');
+// Show suggestions switch: hides (never deletes) all unaccepted suggestions,
+// e.g. in parts of the video where copying boxes is easier and the dashed
+// boxes would hide the openings. Accepted boxes are always shown.
+function setProposalsVisible(visible) {
+    g_proposalsVisible = visible;
+    if (!visible) {
+        selectProposal(null);
+        hideProposalHover();
+    }
+    redrawSequence();
+}
+
+// ── hover ────────────────────────────────────────────────────────────────────
+
+// Hovering a suggestion shows how many frames from here on belong to the same
+// track, without having to click it. Computed on every move (a few
+// thousand suggestions at most), so it is never stale after a rename or accept.
+function updateProposalHover(e, x, y) {
+    var p = proposalUnderCursor(x, y, isInsideBox(x, y));
+    if (!p) { hideProposalHover(); return; }
+    var tip = $('#proposalHover');
+    if (tip.length === 0)
+        tip = $('<div id="proposalHover"></div>').appendTo('body');
+    tip.html(hoverText(p)).css({left: e.pageX + 14, top: e.pageY + 14}).show();
+}
+
+function hideProposalHover() {
+    $('#proposalHover').hide();
+}
+
+function hoverText(p) {
+    var ahead = trackProposals(p, p.frame_nr), track = trackProposals(p);
+    var last = ahead[ahead.length - 1].frame_nr;
+    var gaps = last - p.frame_nr + 1 - ahead.length;
+    var html = '<b>' + escapeHtml(p.label) + '?</b><br>';
+    if (ahead.length === 1)
+        html += 'Same track: only this frame';
+    else
+        html += 'Same track: <b>' + ahead.length + ' frames</b> from here (to frame ' + last + ')' +
+            (gaps > 0 ? ', missing on ' + gaps : '');
+    if (track[0].frame_nr < p.frame_nr)
+        html += '<br>Whole track: frames ' + track[0].frame_nr + '–' + track[track.length - 1].frame_nr;
+    return html;
 }
 
 // ── drawing ──────────────────────────────────────────────────────────────────
@@ -704,6 +744,7 @@ function clearProposals() {
 // Suggestions are dashed (orange = level 1, cyan = level 2); the selected one is
 // thicker. Called from redraw() before the accepted boxes, which are solid.
 function drawProposals() {
+    if (!g_proposalsVisible) return;
     var list = g_proposals[g_currentFrameNr];
     if (!list) return;
     g_context.save();
@@ -730,9 +771,13 @@ function setupProposals() {
     setSelectedProposalControlsEnabled(false);
     $('#propLevels, #propTrack').change(updateProposalSettingsVisibility);
     $('#proposalFromHere').change(showSelectedProposalInfo);
+    $('#propLevels, #propTrack, #proposalPanel .proposal-settings input').change(function() {
+        if (this.id !== 'showProposals')
+            setProposalStatus('Press Reload suggestions to use the new settings.');
+    });
 
-    $('#proposeButton').click(function() { requestProposals(g_currentFrameNr); });
-    $('#clearProposalsButton').click(clearProposals);
+    $('#reloadProposalsButton').click(loadAllProposals);
+    $('#showProposals').change(function() { setProposalsVisible(this.checked); });
 
     $('#renameTrackButton').click(renameSelectedTrack);
     $('#acceptTrackButton').click(acceptSelectedTrack);
@@ -753,4 +798,6 @@ function setupProposals() {
             selectProposal(null);
         }
     });
+
+    loadAllProposals();
 }
