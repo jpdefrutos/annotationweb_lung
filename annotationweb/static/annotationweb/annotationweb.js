@@ -378,6 +378,10 @@ function loadSequence(image_sequence_id, start_frame, nrOfFrames, show_entire_se
     // Arrow key pressed
     $(document).keydown(function(event){
         g_shiftKeyPressed = event.shiftKey;
+        // While typing in a text field the arrows move the text cursor, not the frame
+        var tag = event.target.tagName;
+        if(tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || event.target.isContentEditable)
+            return;
         if(event.which === 37) { // Left
             if(g_shiftKeyPressed) {
                 goToPreviousKeyFrame();

@@ -15,12 +15,12 @@
         <script src="{% static 'annotationweb/jquery.min.js' %}"></script>
         <link rel="stylesheet" href="{% static 'annotationweb/jquery-ui.css' %}">
         <script src="{% static 'annotationweb/jquery-ui.min.js' %}"></script>
-        <script src="{% static 'annotationweb/annotationweb.js' %}"></script>
+        <script src="{% static 'annotationweb/annotationweb.js' %}{% if static_version %}?v={{ static_version }}{% endif %}"></script>
         {% for file in css_files %}
             <link rel="stylesheet" type="text/css" href="{% static file %}">
         {% endfor %}
         {% for file in javascript_files %}
-        <script src="{% static file %}"></script>
+        <script src="{% static file %}{% if static_version %}?v={{ static_version }}{% endif %}"></script>
         {% endfor %}
         <script type="text/javascript">
             $( window ).load(function() {

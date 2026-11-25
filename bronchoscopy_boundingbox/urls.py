@@ -7,4 +7,5 @@ urlpatterns = [
     path('process/<int:task_id>/', views.process_next_image, name='process_image'),
     path('process/<int:task_id>/<int:image_id>/', views.process_image, name='process_image'),
     path('save/', views.save_boxes, name='save_boxes'),
+    path('propose/', views.propose_boxes, name='propose_boxes'),
 ]

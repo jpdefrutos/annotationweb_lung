@@ -12,3 +12,4 @@
 __pycache__/
 /static
 .gitignore
+/lumen_cache
