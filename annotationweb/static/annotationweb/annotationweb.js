@@ -378,9 +378,15 @@ function loadSequence(image_sequence_id, start_frame, nrOfFrames, show_entire_se
     // Arrow key pressed
     $(document).keydown(function(event){
         g_shiftKeyPressed = event.shiftKey;
-        // While typing in a text field the arrows move the text cursor, not the frame
-        var tag = event.target.tagName;
-        if(tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || event.target.isContentEditable)
+        // While typing in a text field the arrows move the text cursor, not
+        // the frame. Checkboxes, buttons etc. keep the arrows for the frames,
+        // and so does a text field marked data-frame-arrows.
+        var t = event.target, tag = t.tagName;
+        var textInput = tag === 'INPUT' && /^(text|search|number|email|password|url|tel)?$/i.test(t.getAttribute('type') || '');
+        if(t.hasAttribute && t.hasAttribute('data-frame-arrows')) {
+            if(event.which === 37 || event.which === 39)
+                event.preventDefault();     // keep the text and its selection as they are
+        } else if(textInput || tag === 'TEXTAREA' || tag === 'SELECT' || t.isContentEditable)
             return;
         if(event.which === 37) { // Left
             if(g_shiftKeyPressed) {

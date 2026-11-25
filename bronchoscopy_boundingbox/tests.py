@@ -131,6 +131,8 @@ class LumenProposalTests(SyntheticVideoTestCase):
         self.assertEqual(self._propose(10, 1).status_code, 400)
         self.assertEqual(self._propose(0, 1, params={'levels': 3}).status_code, 400)
         self.assertEqual(self._propose(0, 1, params={'min_area': 'abc'}).status_code, 400)
+        # min_area 0 would make every speck of noise a box (minutes per request)
+        self.assertEqual(self._propose(0, 1, params={'min_area': 0}).status_code, 400)
 
     def test_user_not_on_task_is_refused(self):
         other = User.objects.create_user('other', password='x')
@@ -412,3 +414,20 @@ class BadFrameAfterChunkTests(SyntheticVideoTestCase):
         r = self._propose(4, 3)
         self.assertEqual(r.status_code, 400)
         self.assertIn('Frame 5', r.json()['message'])
+
+
+class DamagedScopeCacheTests(SyntheticVideoTestCase):
+    """A damaged cached scope area is estimated again instead of failing every
+    request for the video until someone deletes the file."""
+
+    def test_damaged_cache_is_rebuilt(self):
+        self.assertEqual(self._propose(0, 1).status_code, 200)
+        caches = [f for f in os.listdir(self.cache_dir) if f.endswith('_scope.npz')]
+        self.assertEqual(len(caches), 1)
+        path = os.path.join(self.cache_dir, caches[0])
+        with open(path, 'wb') as f:
+            f.write(b'not an npz file')
+        r = self._propose(0, 1)
+        self.assertEqual(r.status_code, 200, r.content)
+        with np.load(path) as z:
+            self.assertIn('roi', z.files)

@@ -83,6 +83,10 @@ function setupSegmentation() {
         // moving the parent first (proposals.js)
         var proposal = e.shiftKey ? null : proposalUnderCursor(pos.x, pos.y, inside);
         if (proposal) {
+            // Without this the browser's default mousedown action moves the
+            // focus away from the Name field that selectProposal just focused,
+            // so typing and Enter (Accept track) would go nowhere.
+            e.preventDefault();
             selectProposal(proposal);
             return;
         }
@@ -339,8 +343,10 @@ function undoLastBoxAction() {
             var at = Math.min(item.index, g_boxes[item.frame_nr].length);
             g_boxes[item.frame_nr].splice(at, 0, item.box);
         }
+        (action.keyFrames || []).forEach(function(f) { addKeyFrame(f); });
     }
     g_annotationHasChanged = true;
+    refreshSuggestionNames();
     if (action.type === 'removeMany' || action.frame_nr === g_currentFrameNr)
         redrawSequence();
     rebuildLabelDropdown();
@@ -385,6 +391,7 @@ function rebuildLabelDropdown() {
     var select = document.getElementById('usedLabelsSelect');
     if (!select) return;
     var currentValue = select.value;
+    var hadOptions = select.options.length > 0;
     var labels = getUsedLabels();
 
     select.innerHTML = '';
@@ -397,14 +404,16 @@ function rebuildLabelDropdown() {
 
     if (labels.indexOf(currentValue) !== -1) {
         select.value = currentValue;
+    } else if (currentValue !== '' || hadOptions) {
+        // The selected label is gone (e.g. all its boxes were deleted): select
+        // nothing rather than silently the first label, so a second click on
+        // Delete boxes cannot delete another label.
+        var blank = document.createElement('option');
+        blank.value = '';
+        blank.textContent = '';
+        select.insertBefore(blank, select.firstChild);
+        select.value = '';
     }
-}
-
-function frameHasLabel(frame_nr, label) {
-    var boxes = g_boxes[frame_nr] || [];
-    for (var i = 0; i < boxes.length; i++)
-        if (boxes[i].label === label) return true;
-    return false;
 }
 
 // The section of a label that starts on frame `start`: the consecutive frames
@@ -412,7 +421,7 @@ function frameHasLabel(frame_nr, label) {
 // Empty if `start` itself has no box with the label.
 function labelSectionFrom(label, start) {
     var frames = [];
-    for (var f = start; frameHasLabel(f, label); f++)
+    for (var f = start; labelExistsInFrame(f, label); f++)
         frames.push(f);
     return frames;
 }
@@ -447,7 +456,7 @@ function renameSelectedLabel() {
 
     var count = 0;
     for (var cf in g_boxes)
-        if (inRange(cf) && frameHasLabel(cf, oldLabel)) count++;
+        if (inRange(cf) && labelExistsInFrame(cf, oldLabel)) count++;
     if (count === 0) {
         showNotice('#labelNotice', 'No box named "' + oldLabel + '" on ' + range.text + '.', true);
         return;
@@ -467,7 +476,7 @@ function renameSelectedLabel() {
     for (var frame_nr in g_boxes) {
         if (!inRange(frame_nr)) continue;
         var boxesInFrame = g_boxes[frame_nr];
-        var targetExists = frameHasLabel(frame_nr, newLabel);
+        var targetExists = labelExistsInFrame(frame_nr, newLabel);
         for (var k = 0; k < boxesInFrame.length; k++) {
             if (boxesInFrame[k].label !== oldLabel) continue;
             if (targetExists) {
@@ -486,6 +495,7 @@ function renameSelectedLabel() {
                 renamed[u].box.label = renamed[u].label;
                 renamed[u].box.color = renamed[u].color;
             }
+            refreshSuggestionNames();
         }});
         g_annotationHasChanged = true;
     }
@@ -494,6 +504,7 @@ function renameSelectedLabel() {
         select.value = newLabel;
         $('#boxLabel').val(newLabel);
     }
+    refreshSuggestionNames();
     redrawSequence();
 
     showNotice('#labelNotice', 'Renamed ' + renamed.length + ' box(es) "' + oldLabel + '" → "' +
@@ -509,12 +520,12 @@ function renameSelectedLabel() {
 // first frame, if `frame` has no box with it) to the end of that section.
 function setDeleteRange(label, frame) {
     var from = null;
-    if (frameHasLabel(frame, label)) {
+    if (labelExistsInFrame(frame, label)) {
         from = frame;
     } else {
         for (var key in g_boxes) {
             var f = parseInt(key, 10);
-            if (frameHasLabel(key, label) && (from === null || f < from)) from = f;
+            if (labelExistsInFrame(key, label) && (from === null || f < from)) from = f;
         }
     }
     if (from === null) {
@@ -565,16 +576,22 @@ function deleteSelectedLabel() {
     if (!r) return;
     var from = r.from, to = r.to;
 
-    var removed = [];
+    var removed = [], keyFrames = [];
     for (var fr in g_boxes) {
         var n = parseInt(fr, 10);
         if (n < from || n > to) continue;
-        var boxes = g_boxes[fr];
+        var boxes = g_boxes[fr], before = boxes.length;
         for (var i = 0; i < boxes.length; ) {
             if (boxes[i].label === label)
-                removed.push({frame_nr: fr, index: i, box: boxes.splice(i, 1)[0]});
+                removed.push({frame_nr: n, index: i, box: boxes.splice(i, 1)[0]});
             else
                 i++;
+        }
+        // A frame left without boxes is no longer annotated; else saving
+        // would store it as an annotated frame with no boxes.
+        if (before > 0 && boxes.length === 0 && g_targetFrames.indexOf(n) !== -1) {
+            removeKeyFrame(n);
+            keyFrames.push(n);
         }
     }
     var range = r.text;
@@ -582,12 +599,19 @@ function deleteSelectedLabel() {
         showNotice('#labelNotice', 'No box named "' + label + '" on ' + range + '.', true);
         return;
     }
-    g_undoStack.push({type: 'removeMany', removed: removed});
+    g_undoStack.push({type: 'removeMany', removed: removed, keyFrames: keyFrames});
     g_annotationHasChanged = true;
+    refreshSuggestionNames();
     rebuildLabelDropdown();
     redrawSequence();
     showNotice('#labelNotice', 'Deleted ' + removed.length + ' box(es) named "' + label + '" on ' +
         range + '. Ctrl+Z undoes.');
+}
+
+// Nested suggestions show their parent's current name (proposals.js), so
+// they follow when an accepted parent box is renamed, deleted or restored.
+function refreshSuggestionNames() {
+    if (typeof refreshChildNames === 'function') refreshChildNames();
 }
 
 // Shows a short message that fades out by itself, so nothing has to be
@@ -652,9 +676,10 @@ function createBox(x, y, x2, y2, label, color) {
 
 // Returns the new box, or null if it was not added (too small, or the label is
 // already used on that frame).
-function addBox(frame_nr, x, y, x2, y2, label, color, recordUndo, updateDropdown) {
+function addBox(frame_nr, x, y, x2, y2, label, color, recordUndo, updateDropdown, redraw) {
     if (recordUndo === undefined) recordUndo = true;
     if (updateDropdown === undefined) updateDropdown = true;
+    if (redraw === undefined) redraw = true;
     if (Math.abs(x2 - x) > g_minimumSize && Math.abs(y2 - y) > g_minimumSize) {
         if (labelExistsInFrame(frame_nr, label)) return null;
         if (!color) color = stringToColor(label);
@@ -669,7 +694,8 @@ function addBox(frame_nr, x, y, x2, y2, label, color, recordUndo, updateDropdown
         if (recordUndo)
             g_undoStack.push({type: 'add', frame_nr: frame_nr, box: box});
         addKeyFrame(frame_nr);
-        redrawSequence();
+        if (redraw)
+            redrawSequence();
         // rebuildLabelDropdown() rescans every box on every frame; callers that
         // add many boxes in a loop (hydration, copy/paste) pass false and rebuild
         // once after the loop instead, to avoid an O(n^2) stall.

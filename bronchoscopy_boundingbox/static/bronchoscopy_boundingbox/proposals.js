@@ -55,6 +55,8 @@ function setProposalStatus(text, isError) {
 function requestProposals(startFrame) {
     if (g_proposalBusy || g_imageSequenceID === null) return;
     var count = parseInt($('#propCount').val(), 10) || 60;
+    // Only frames this task shows (a task may load only part of the video)
+    count = Math.max(1, Math.min(count, g_startFrame + g_sequenceLength - startFrame + 1));
     g_proposalBusy = true;
     $('#proposeButton').prop('disabled', true);
     setProposalStatus('Finding boxes in frames ' + startFrame + '–' + (startFrame + count - 1) +
@@ -141,14 +143,15 @@ function earlierTrackNames(firstFrame) {
         if (fn >= firstFrame) continue;
         var list = g_proposals[f];
         for (var i = 0; i < list.length; i++)
-            if (list[i].label !== list[i].placeholder) consider(list[i], fn, list[i].label);
+            if (list[i].tracked && list[i].label !== list[i].placeholder)
+                consider(list[i], fn, list[i].label);
     }
     for (var g in g_boxes) {
         var gn = parseInt(g, 10);
         if (gn >= firstFrame) continue;
         var boxes = g_boxes[g];
         for (var j = 0; j < boxes.length; j++)
-            if (boxes[j].src) consider(boxes[j].src, gn, boxes[j].label);
+            if (boxes[j].src && boxes[j].src.tracked) consider(boxes[j].src, gn, boxes[j].label);
     }
     var names = {};
     for (var key in best) names[key] = best[key].name;
@@ -195,9 +198,12 @@ function letterName(i) {
     return s;
 }
 
-function letterFor(counterKey, trackKey) {
+// taken(letter), if given, says a letter is already used next to this one;
+// a new track then skips it.
+function letterFor(counterKey, trackKey, taken) {
     if (!(trackKey in g_trackLetters)) {
         var n = g_letterCounters[counterKey] || 0;
+        while (taken && taken(letterName(n))) n++;
         g_trackLetters[trackKey] = letterName(n);
         g_letterCounters[counterKey] = n + 1;
     }
@@ -226,8 +232,9 @@ function parentName(p) {
 
 // Sets r.letter and returns the suggested name. parentLabels holds the names
 // of this response's main boxes ("frame|box_id" -> name), which may be hidden
-// and so not findable through parentName().
-function suggestedName(r, parentLabels, ownName) {
+// and so not findable through parentName(). frameRows (optional) are all rows
+// of r's frame in this response.
+function suggestedName(r, parentLabels, ownName, frameRows) {
     var tracked = r.label.charAt(0) === 'T';
     // A handed-over box normally takes its track's earlier name (see
     // syncHandedOverNames), so it only gets a letter of its own if it has none.
@@ -241,7 +248,20 @@ function suggestedName(r, parentLabels, ownName) {
         return branch + ',' + r.letter;
     }
     var parent = parentLabels[r.frame_nr + '|' + r.parent_id] || parentName(r) || ('T' + r.parent_id);
-    r.letter = letterFor(scope + '|parent|' + r.parent_id, trackKey);
+    // Letters count per parent track. If the parent's track broke and goes on
+    // under a new ID while its nested boxes kept theirs (and their letters),
+    // the new parent's count starts at "a" again, so a new nested box skips
+    // letters its siblings on this frame already have, or an accepted box has.
+    var taken = function(letter) {
+        var rows = frameRows || [];
+        for (var i = 0; i < rows.length; i++) {
+            var s = rows[i];
+            if (s !== r && s.level === 2 && s.parent_id === r.parent_id &&
+                    g_trackLetters[scope + '|' + s.box_id] === letter) return true;
+        }
+        return labelExistsInFrame(r.frame_nr, parent + ',' + letter);
+    };
+    r.letter = letterFor(scope + '|parent|' + r.parent_id, trackKey, taken);
     return parent + ',' + r.letter;
 }
 
@@ -301,13 +321,15 @@ function syncHandedOverNames() {
 function storeProposals(rows, firstFrame, lastFrame) {
     var hidden = 0;
     var names = earlierTrackNames(firstFrame);
-    var parentLabels = {};
+    var parentLabels = {}, byFrame = {};
     for (var f = firstFrame; f <= lastFrame; f++)
         delete g_proposals[f];
+    for (var j = 0; j < rows.length; j++)
+        (byFrame[rows[j].frame_nr] = byFrame[rows[j].frame_nr] || []).push(rows[j]);
     for (var i = 0; i < rows.length; i++) {
         var r = rows[i];
-        var tracked = r.label.charAt(0) === 'T';
-        r.placeholder = suggestedName(r, parentLabels);
+        var tracked = r.tracked = r.label.charAt(0) === 'T';
+        r.placeholder = suggestedName(r, parentLabels, false, byFrame[r.frame_nr]);
         r.label = r.placeholder;
         var key = r.run_id + '|' + r.box_id;
         if (tracked && key in names) r.label = names[key];
@@ -333,8 +355,11 @@ function proposalExists(p) {
     return !!list && list.indexOf(p) !== -1;
 }
 
+// Without tracking ("D" boxes) the IDs are only numbers within one frame, so
+// such a "track" is just the box itself.
 function sameTrack(a, b) {
-    return a.run_id === b.run_id && a.box_id === b.box_id;
+    return a.run_id === b.run_id && a.box_id === b.box_id &&
+        (a.tracked || a.frame_nr === b.frame_nr);
 }
 
 // Proposals in p's track: same (run_id, box_id), optionally from fromFrame on.
@@ -423,9 +448,11 @@ function acceptProposalAs(p, name, recordUndo) {
     // addBox() marks the frame as a key frame; remember if that is new, so an
     // undo can take the mark away again (unacceptTrack)
     p.addedKeyFrame = g_targetFrames.indexOf(p.frame_nr) === -1;
-    var box = addBox(p.frame_nr, p.x, p.y, p.x + p.width, p.y + p.height, name, undefined, recordUndo, false);
+    // no redraw per box: the callers redraw once when done
+    var box = addBox(p.frame_nr, p.x, p.y, p.x + p.width, p.y + p.height, name, undefined, recordUndo, false, false);
     if (!box) return null;
-    box.src = { run_id: p.run_id, box_id: p.box_id };   // in memory only; for parentName()
+    // in memory only; for parentName() and continuing accepted tracks
+    box.src = { run_id: p.run_id, box_id: p.box_id, tracked: !!p.tracked };
     removeProposal(p);
     g_annotationHasChanged = true;
     return box;
@@ -483,8 +510,11 @@ function showSelectedProposalInfo() {
     $('#selectedProposalInfo').html(info);
 }
 
+// "From this frame onward" counts from the selected suggestion's frame (not
+// the frame on screen), so the info line and the action always agree.
 function trackScopeFrame() {
-    return $('#proposalFromHere').is(':checked') ? g_currentFrameNr : undefined;
+    var p = g_selectedProposal;
+    return p && $('#proposalFromHere').is(':checked') ? p.frame_nr : undefined;
 }
 
 function describeRange(list) {
@@ -556,7 +586,7 @@ function autoAcceptContinuedTracks(first, last) {
     for (var f = first - lookback; f < first; f++) {
         var boxes = g_boxes[f] || [];
         for (var i = 0; i < boxes.length; i++)
-            if (boxes[i].src)
+            if (boxes[i].src && boxes[i].src.tracked)
                 accepted[boxes[i].src.run_id + '|' + boxes[i].src.box_id] = boxes[i].label;
     }
     if (Object.keys(accepted).length === 0) return {boxes: 0, tracks: 0};
@@ -566,7 +596,7 @@ function autoAcceptContinuedTracks(first, last) {
         list.sort(function(a, b) { return a.level - b.level; });   // parents first
         for (var k = 0; k < list.length; k++) {
             var key = list[k].run_id + '|' + list[k].box_id;
-            if (!(key in accepted)) continue;
+            if (!list[k].tracked || !(key in accepted)) continue;
             var box = acceptProposalAs(list[k], accepted[key], false);
             if (box) {
                 done.push({proposal: list[k], box: box});
@@ -588,14 +618,21 @@ function autoAcceptContinuedTracks(first, last) {
 // Undo for Accept / Accept track: removes the accepted boxes and turns them
 // back into suggestions.
 function unacceptTrack(accepted, notice) {
+    // Frames that the accept made key frames (by any of its boxes, e.g. a
+    // parent and its child on the same frame) lose the mark again if empty,
+    // else saving would store an empty annotated frame.
+    var marked = {};
     for (var i = 0; i < accepted.length; i++) {
         var a = accepted[i], f = a.proposal.frame_nr;
         var boxes = g_boxes[f] || [];
         var k = boxes.indexOf(a.box);
         if (k !== -1) boxes.splice(k, 1);
-        if (a.proposal.addedKeyFrame && boxes.length === 0)
-            removeKeyFrame(f);      // else saving would store an empty annotated frame
+        if (a.proposal.addedKeyFrame) marked[f] = true;
         (g_proposals[f] = g_proposals[f] || []).push(a.proposal);
+    }
+    for (var m in marked) {
+        var fn = parseInt(m, 10);
+        if (!(g_boxes[fn] && g_boxes[fn].length)) removeKeyFrame(fn);
     }
     refreshChildNames();
     showProposalNotice(notice || ('Undid Accept track: ' + accepted.length + ' box(es) are suggestions again.'));

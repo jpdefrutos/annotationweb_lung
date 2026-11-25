@@ -80,7 +80,7 @@ class Params:
 # Fields the UI may set, with (type, min, max). Everything else stays default.
 PARAM_LIMITS = {
     "levels": (int, 1, 2),
-    "min_area": (float, 0.0, 1.0),
+    "min_area": (float, 0.001, 1.0),     # smaller: every speck of noise is a box
     "min_gap": (float, 0.0, 255.0),
     "child_min": (float, 0.0, 1.0),
     "child_max": (float, 0.0, 1.0),
@@ -250,12 +250,16 @@ def roi_and_mask(frames, cache_dir, cache_key, erode=5):
     paths = [frames[nrs[i]] for i in idx]
 
     cache = os.path.join(cache_dir, f"{cache_key}_scope.npz")
+    roi = raw = None
     if os.path.isfile(cache):
-        with np.load(cache) as z:
-            roi = dict(zip(("left", "right", "top", "bottom"),
-                           (int(v) for v in z["roi"])))
-            raw = z["mask"]
-    else:
+        try:
+            with np.load(cache) as z:
+                roi = dict(zip(("left", "right", "top", "bottom"),
+                               (int(v) for v in z["roi"])))
+                raw = z["mask"]
+        except Exception:               # damaged file: estimate again below
+            roi = raw = None
+    if raw is None:
         missing = [p for p in paths if not os.path.isfile(p)]
         if missing:
             raise LumenError(f"Frame file not found: {missing[0]}")

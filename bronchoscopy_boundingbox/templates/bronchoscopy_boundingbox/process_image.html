@@ -80,7 +80,7 @@ loadBBTask({{ image_sequence.id }});
         </label>
     </div>
     <div class="proposal-row">
-        <label title="Min blob size, fraction of the scope image">min_area <input type="number" id="propMinArea" value="0.005" step="0.001" min="0" max="1" style="width: 5em;"></label>
+        <label title="Min blob size, fraction of the scope image">min_area <input type="number" id="propMinArea" value="0.005" step="0.001" min="0.001" max="1" style="width: 5em;"></label>
     </div>
     <div class="proposal-row prop-level2">
         <label title="Nested opening must be this many grey levels darker">min_gap <input type="number" id="propMinGap" value="10" step="1" min="0" max="255" style="width: 4em;"></label>
@@ -106,7 +106,7 @@ loadBBTask({{ image_sequence.id }});
     <div id="selectedProposalPanel">
         <div id="selectedProposalInfo" style="font-size: 0.9em;"><i>Click a dashed suggestion box in the image to select it.</i></div>
         <label for="proposalName"><strong>Name:</strong></label>
-        <input type="text" id="proposalName" style="width: 100%; margin-top: 2px; padding: 4px 6px; box-sizing: border-box;">
+        <input type="text" id="proposalName" data-frame-arrows style="width: 100%; margin-top: 2px; padding: 4px 6px; box-sizing: border-box;">
         <label style="font-size: 0.9em;"><input type="checkbox" id="proposalFromHere" checked> Track actions only from this frame onward</label>
         <div class="proposal-row">
             <button type="button" id="renameTrackButton" title="Give every suggestion in this track the name above">Rename track</button>
