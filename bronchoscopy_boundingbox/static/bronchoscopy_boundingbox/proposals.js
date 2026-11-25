@@ -316,6 +316,7 @@ function suggestedName(r, parentLabels, ownName, frameRows) {
 // After a parent is renamed or accepted, its still-unnamed children follow:
 // parent "1,2,1,1" turns child "1,2,1,a,b" into "1,2,1,1,b".
 function refreshChildNames() {
+    var sel = g_selectedProposal, oldLabel = sel && sel.label;
     for (var f in g_proposals) {
         var list = g_proposals[f];
         for (var i = 0; i < list.length; i++) {
@@ -327,6 +328,11 @@ function refreshChildNames() {
         }
     }
     syncHandedOverNames();
+    // The Name field follows the selected suggestion's name while the
+    // annotator has not edited it, so it never shows an outdated temporary name
+    // (which the "still the temporary name" question would no longer catch).
+    if (sel && sel.label !== oldLabel && $('#proposalName').val() === oldLabel)
+        fillProposalName(sel);
 }
 
 // A nested box that became a main box (the server marks it was_nested, e.g.
@@ -512,15 +518,20 @@ function selectProposal(p) {
     }
     showSelectedProposalInfo();
 
-    // Pre-fill the current name. For a suggested name, only its last part (the
-    // letter) is selected, so typing "1" turns "1,2,1,a" into "1,2,1,1".
-    var input = $('#proposalName');
-    var el = input.val(p.label)[0];
+    var el = fillProposalName(p);
     // no scrolling to the field: the image would move under the mouse
     el.focus({preventScroll: true});
+    fillProposalName(p);        // again: the selection is kept only once focused
+    redrawSequence();
+}
+
+// Puts p's current name in the Name field. For a suggested name, only its last
+// part (the letter) is selected, so typing "1" turns "1,2,1,a" into "1,2,1,1".
+function fillProposalName(p) {
+    var el = $('#proposalName').val(p.label)[0];
     var start = p.label === p.placeholder && p.letter ? p.label.lastIndexOf(',') + 1 : 0;
     el.setSelectionRange(start, p.label.length);
-    redrawSequence();
+    return el;
 }
 
 // The selected-suggestion controls are always visible (so they can be found),
